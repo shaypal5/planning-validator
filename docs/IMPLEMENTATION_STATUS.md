@@ -7,6 +7,7 @@
 - Established the initial Python package, CLI skeleton, config models, tests, CI, examples, and repo tooling baseline.
 - Integrated `pr-agent-context` into repository CI and added a refresh workflow that uses append-mode managed comments with coverage artifact reuse.
 - Aligned `pr-agent-context` coverage reporting with the working downstream pattern: raw coverage upload in test jobs, combined XML/report artifacts in a dedicated coverage job, and XML-based patch coverage input for comment rendering.
+- Hardened the `pr-agent-context` refresh workflow with the approval-gated fallback pattern from `v4.0.19`, including scheduled fan-out dispatch, explicit PR SHA overrides, and same-head dispatch dedupe for same-repo PRs.
 
 ## Remaining
 
@@ -16,6 +17,16 @@
 - Milestone 5: branch and draft PR manager.
 - Milestone 6: end-to-end `run` command and reusable workflow wiring.
 - Milestone 7: fixtures, polish, release preparation, and OSS docs hardening.
+
+## Current planned PR breakdown
+
+- Planned implementation slices use `P-<Milestone><Letter>` notation such as `P-M2A`.
+- Milestone 2 is split into:
+  - `P-M2A`: GitHub evidence client and normalized evidence models.
+  - `P-M2B`: local planning/tracking file inventory plus gitignore and path filtering.
+  - `P-M2C`: repository snapshot assembly that combines local files with GitHub evidence.
+- `P-M2A` is complete.
+- `P-M2B` is the next implementation slice in progress.
 
 ## Decisions
 

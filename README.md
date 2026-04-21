@@ -12,6 +12,11 @@ The repository is being built directly from the design set under
 - unit tests, Ruff, coverage, pre-commit, and CI
 - example configs and target-repo workflow scaffolding
 
+Implementation planning uses `P-<Milestone><Letter>` identifiers such as `P-M2A` to avoid
+confusion with real GitHub pull request numbers. Milestone 2 is currently split into `P-M2A`
+(GitHub evidence client), `P-M2B` (local file inventory and filtering), and `P-M2C`
+(repo snapshot assembly).
+
 ## Local setup
 
 ```bash
@@ -39,7 +44,9 @@ consumer for PR handoff comments and patch-coverage feedback.
   test job, combines it in a dedicated `coverage` job, and uploads `coverage.xml` plus
   `coverage-report.txt` as `pr-agent-context-coverage-report`.
 - [`.github/workflows/pr-agent-context-refresh.yml`](./.github/workflows/pr-agent-context-refresh.yml)
-  provides the later-lifecycle refresh path and uses `execution_mode: refresh` with
-  `publish_mode: append`.
+  provides the later-lifecycle refresh path, uses `execution_mode: refresh` with
+  `publish_mode: append`, and now includes the approval-gated `schedule` ->
+  `workflow_dispatch` fallback pattern recommended in `pr-agent-context` v4.0.19 for
+  same-repo PRs.
 - [`.github/pr-agent-context-template.md`](./.github/pr-agent-context-template.md) supplies the
   repository-specific prompt template used by both flows.
