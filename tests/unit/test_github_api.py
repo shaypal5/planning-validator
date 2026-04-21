@@ -5,6 +5,7 @@ from urllib.parse import parse_qs
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from planning_validator.github_api import GitHubApiError, GitHubEvidenceClient
 from planning_validator.models import GitHubIssueState
@@ -244,6 +245,55 @@ def test_fetch_recent_merged_pull_requests_reads_multiple_pages() -> None:
     assert [pull_request.number for pull_request in pull_requests] == [12]
 
 
+def test_fetch_recent_merged_pull_requests_stops_after_first_older_merged_pr() -> None:
+    page_requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/acme/widgets/pulls":
+            page = parse_qs(request.url.query.decode()).get("page", ["1"])[0]
+            page_requests.append(page)
+            if page == "1":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "number": 12,
+                            "title": "Recent merged change",
+                            "body": None,
+                            "merged_at": "2026-04-20T09:00:00Z",
+                            "html_url": "https://github.com/acme/widgets/pull/12",
+                            "labels": [],
+                            "user": {"login": "shay"},
+                        },
+                        {
+                            "number": 11,
+                            "title": "Older merged change",
+                            "body": None,
+                            "merged_at": "2026-04-18T09:00:00Z",
+                            "html_url": "https://github.com/acme/widgets/pull/11",
+                            "labels": [],
+                            "user": {"login": "shay"},
+                        },
+                    ],
+                )
+            raise AssertionError("Pagination should stop before requesting page 2")
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    client = GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    pull_requests = client.fetch_recent_merged_pull_requests(
+        merged_since=datetime(2026, 4, 19, tzinfo=UTC)
+    )
+
+    assert [pull_request.number for pull_request in pull_requests] == [12]
+    assert page_requests == ["1"]
+
+
 def test_client_context_manager_closes_underlying_http_client() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/repos/acme/widgets/pulls":
@@ -472,6 +522,21 @@ def test_get_json_wraps_http_errors() -> None:
         client.fetch_recent_merged_pull_requests(merged_since=datetime(2026, 4, 19, tzinfo=UTC))
 
 
+def test_get_json_wraps_invalid_json_payloads() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"<html>bad gateway</html>")
+
+    client = GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(GitHubApiError, match="returned invalid JSON"):
+        client.fetch_recent_merged_pull_requests(merged_since=datetime(2026, 4, 19, tzinfo=UTC))
+
+
 def test_fetch_recent_merged_pull_requests_rejects_non_list_top_level_payload() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/repos/acme/widgets/pulls":
@@ -496,3 +561,47 @@ def test_extract_linked_issue_numbers_returns_empty_for_missing_body() -> None:
     assert client._extract_linked_issue_numbers("") == []
 
     client.close()
+
+
+def test_fetch_recent_merged_pull_requests_surfaces_invalid_issue_state_via_validation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/acme/widgets/pulls":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "number": 12,
+                        "title": "Recent merged change",
+                        "body": "Fixes #44.",
+                        "merged_at": "2026-04-20T09:00:00Z",
+                        "html_url": "https://github.com/acme/widgets/pull/12",
+                        "labels": [],
+                        "user": {"login": "shay"},
+                    }
+                ],
+            )
+        if request.url.path == "/repos/acme/widgets/issues/44":
+            return httpx.Response(
+                200,
+                json={
+                    "number": 44,
+                    "title": "Track milestone",
+                    "state": "merged",
+                    "closed_at": None,
+                    "html_url": "https://github.com/acme/widgets/issues/44",
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    client = GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ValidationError, match="state"):
+        client.fetch_recent_merged_pull_requests(
+            merged_since=datetime(2026, 4, 19, tzinfo=UTC),
+            include_linked_issues=True,
+        )

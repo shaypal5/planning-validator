@@ -24,7 +24,8 @@
   - `P-M2A`: GitHub evidence client and normalized evidence models.
   - `P-M2B`: local planning/tracking file inventory plus gitignore and path filtering.
   - `P-M2C`: repository snapshot assembly that combines local files with GitHub evidence.
-- `P-M2A` is the next implementation slice in progress.
+- `P-M2A` is complete.
+- `P-M2B` is the next implementation slice in progress.
 
 ## Decisions
 

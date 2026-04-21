@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from planning_validator.models import GitHubIssueState, RecentIssue, RecentPullRequest
+from planning_validator.models import RecentIssue, RecentPullRequest
 
 _LINKED_ISSUE_PATTERN = re.compile(
     r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(?P<number>\d+)\b",
@@ -77,7 +77,7 @@ class GitHubEvidenceClient:
 
             pull_request = self._normalize_pull_request(payload)
             if pull_request.merged_at < merged_since:
-                continue
+                break
 
             if include_file_lists:
                 pull_request = pull_request.model_copy(
@@ -131,8 +131,7 @@ class GitHubEvidenceClient:
             return None
         return self._normalize_issue(payload)
 
-    def _paginate(self, path: str, *, params: dict[str, object] | None = None) -> list[Any]:
-        items: list[Any] = []
+    def _paginate(self, path: str, *, params: dict[str, object] | None = None) -> Any:
         page = 1
         while True:
             page_items = self._get_json_list(
@@ -145,11 +144,10 @@ class GitHubEvidenceClient:
             )
             if not page_items:
                 break
-            items.extend(page_items)
+            yield from page_items
             if len(page_items) < 100:
                 break
             page += 1
-        return items
 
     def _get_json(self, path: str, *, params: dict[str, object] | None = None) -> Any:
         try:
@@ -157,7 +155,12 @@ class GitHubEvidenceClient:
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise GitHubApiError(f"GitHub API request failed for {path}: {exc}") from exc
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise GitHubApiError(
+                f"GitHub API returned invalid JSON for {path} (status {response.status_code})"
+            ) from exc
 
     def _get_json_list(self, path: str, *, params: dict[str, object] | None = None) -> list[Any]:
         payload = self._get_json(path, params=params)
@@ -190,7 +193,7 @@ class GitHubEvidenceClient:
             {
                 "number": payload["number"],
                 "title": payload["title"],
-                "state": GitHubIssueState(payload["state"]),
+                "state": payload["state"],
                 "closed_at": payload.get("closed_at"),
                 "url": payload["html_url"],
             }
