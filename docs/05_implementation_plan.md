@@ -11,6 +11,10 @@ Build `planning-validator` as a reusable, open-source, GitHub-native tool that:
 
 Implementation should proceed through well-scoped PRs, each independently reviewable and testable.
 
+Planned implementation slices in this repository use `P-<Milestone><Letter>` identifiers such as
+`P-M2A`. Reserve `PR #123` notation for actual GitHub pull requests, and avoid bare numeric labels
+for planned work items in docs or agent notes.
+
 ---
 
 ## Delivery principles
@@ -110,6 +114,11 @@ Build the repository snapshot layer and GitHub API client for recent PR/issue co
 - optional linked-issue fetch
 - file inventory from planning/tracking globs
 - snapshot builder
+
+### Planned PR breakdown
+- `P-M2A`: GitHub evidence client and normalized evidence models
+- `P-M2B`: local planning/tracking file inventory plus gitignore/path filtering
+- `P-M2C`: repo snapshot assembly and integration of local files with GitHub evidence
 
 ### Expected files
 - `src/planning_validator/github_api.py`
@@ -325,13 +334,15 @@ Harden the repository for public open-source release.
 
 Aim for approximately these PRs:
 
-1. scaffold + tooling + config schema
-2. snapshot + GitHub API
-3. detector core
-4. patcher core
-5. PR manager
-6. reusable workflow + end-to-end wiring
-7. polish + docs + release prep
+1. `P-M1A`: scaffold + tooling + config schema
+2. `P-M2A`: GitHub evidence client + normalized evidence models
+3. `P-M2B`: local file inventory + gitignore/path filtering
+4. `P-M2C`: repo snapshot assembly
+5. `P-M3A`: detector core
+6. `P-M4A`: patcher core
+7. `P-M5A`: PR manager
+8. `P-M6A`: reusable workflow + end-to-end wiring
+9. `P-M7A`: polish + docs + release prep
 
 If a PR becomes too large, split it further rather than broadening scope.
 

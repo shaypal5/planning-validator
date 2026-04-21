@@ -56,3 +56,9 @@ examples/
 ## Immediate state pointer
 
 - Short-lived execution state for agents: `.agent-plan.md`
+
+## Planned PR notation
+
+- Use `P-<Milestone><Letter>` identifiers such as `P-M2A` for planned implementation slices.
+- Use `PR #123` only for real GitHub pull requests.
+- Milestone 2 is split into `P-M2A` (GitHub evidence client), `P-M2B` (local file inventory and filtering), and `P-M2C` (repo snapshot assembly).

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -15,6 +16,11 @@ class PatchingProvider(StrEnum):
 class PullRequestBodyMode(StrEnum):
     STRUCTURED = "structured"
     SHORT = "short"
+
+
+class GitHubIssueState(StrEnum):
+    OPEN = "open"
+    CLOSED = "closed"
 
 
 class LookbackConfig(BaseModel):
@@ -134,6 +140,46 @@ class GitHubConfig(BaseModel):
     include_linked_issues: bool = True
 
     model_config = ConfigDict(extra="forbid")
+
+
+class RecentIssue(BaseModel):
+    number: int
+    title: str
+    state: GitHubIssueState
+    closed_at: datetime | None = None
+    url: str
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("closed_at")
+    @classmethod
+    def validate_closed_at_timezone(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("must include timezone info")
+        return value
+
+
+class RecentPullRequest(BaseModel):
+    number: int
+    title: str
+    body: str | None = None
+    author: str | None = None
+    merged_at: datetime
+    labels: list[str] = Field(default_factory=list)
+    changed_files: list[str] = Field(default_factory=list)
+    linked_issues: list[RecentIssue] = Field(default_factory=list)
+    url: str
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("merged_at")
+    @classmethod
+    def validate_merged_at_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("must include timezone info")
+        return value
 
 
 class ValidatorConfig(BaseModel):

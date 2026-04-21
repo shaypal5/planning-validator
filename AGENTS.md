@@ -18,6 +18,7 @@
 
 - Continue work on the current feature branch unless the user explicitly asks for a new branch.
 - For new implementation branches, prefer the `codex/<scope>` prefix.
+- Use planned-PR identifiers such as `P-M2A` for implementation planning slices; reserve `PR #123` for actual GitHub pull requests.
 - Feature work is not complete until changes are pushed and a labeled, non-draft GitHub PR is open.
 - Reuse the existing PR when the work belongs to the same branch.
 - Apply an appropriate milestone when one exists. If none exists, note that explicitly in the PR.

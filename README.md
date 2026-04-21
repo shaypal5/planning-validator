@@ -12,6 +12,11 @@ The repository is being built directly from the design set under
 - unit tests, Ruff, coverage, pre-commit, and CI
 - example configs and target-repo workflow scaffolding
 
+Implementation planning uses `P-<Milestone><Letter>` identifiers such as `P-M2A` to avoid
+confusion with real GitHub pull request numbers. Milestone 2 is currently split into `P-M2A`
+(GitHub evidence client), `P-M2B` (local file inventory and filtering), and `P-M2C`
+(repo snapshot assembly).
+
 ## Local setup
 
 ```bash

@@ -17,6 +17,15 @@
 - Milestone 6: end-to-end `run` command and reusable workflow wiring.
 - Milestone 7: fixtures, polish, release preparation, and OSS docs hardening.
 
+## Current planned PR breakdown
+
+- Planned implementation slices use `P-<Milestone><Letter>` notation such as `P-M2A`.
+- Milestone 2 is split into:
+  - `P-M2A`: GitHub evidence client and normalized evidence models.
+  - `P-M2B`: local planning/tracking file inventory plus gitignore and path filtering.
+  - `P-M2C`: repository snapshot assembly that combines local files with GitHub evidence.
+- `P-M2A` is the next implementation slice in progress.
+
 ## Decisions
 
 - Milestone 1 rejects non-markdown planning/tracking matches during config validation instead of warning.
