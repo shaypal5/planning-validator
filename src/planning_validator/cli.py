@@ -18,7 +18,9 @@ CONFIG_OPTION = typer.Option(..., "--config", exists=True, dir_okay=False, reada
 REPO_ROOT_OPTION = typer.Option(
     None,
     "--repo-root",
+    exists=True,
     file_okay=False,
+    readable=True,
     resolve_path=True,
     help="Repository root used when expanding planning/tracking globs.",
 )
@@ -53,7 +55,7 @@ def validate_config(
         "repo_root": str(resolved.repo_root),
         "planning_files": list(resolved.planning_paths),
         "tracking_files": list(resolved.tracking_paths),
-        "patchable_files": list(resolved.all_document_paths),
+        "patchable_files": list(resolved.patchable_paths),
     }
     if as_json:
         typer.echo(json.dumps(payload, indent=2))

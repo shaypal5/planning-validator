@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import glob
 from dataclasses import dataclass
-from fnmatch import fnmatch
 from pathlib import Path
 
 import yaml
@@ -24,6 +23,7 @@ class ResolvedConfig:
     repo_root: Path
     planning_paths: tuple[str, ...]
     tracking_paths: tuple[str, ...]
+    patchable_paths: tuple[str, ...]
 
     @property
     def all_document_paths(self) -> tuple[str, ...]:
@@ -36,6 +36,10 @@ def load_config(config_path: str | Path, repo_root: str | Path | None = None) ->
         raise ConfigError(f"Config file not found: {path}")
 
     root = Path(repo_root).expanduser().resolve() if repo_root else Path.cwd().resolve()
+    if not root.exists():
+        raise ConfigError(f"Repository root not found: {root}")
+    if not root.is_dir():
+        raise ConfigError(f"Repository root is not a directory: {root}")
 
     try:
         raw_data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -52,7 +56,8 @@ def load_config(config_path: str | Path, repo_root: str | Path | None = None) ->
 
     planning_paths = _resolve_globs(root, config.planning_files, field_name="planning_files")
     tracking_paths = _resolve_globs(root, config.tracking_files, field_name="tracking_files")
-    _validate_semantics(
+    patchable_paths = _validate_semantics(
+        repo_root=root,
         config=config,
         planning_paths=planning_paths,
         tracking_paths=tracking_paths,
@@ -64,6 +69,7 @@ def load_config(config_path: str | Path, repo_root: str | Path | None = None) ->
         repo_root=root,
         planning_paths=tuple(sorted(planning_paths)),
         tracking_paths=tuple(sorted(tracking_paths)),
+        patchable_paths=tuple(sorted(patchable_paths)),
     )
 
 
@@ -92,28 +98,33 @@ def _reject_non_markdown(paths: set[str], *, field_name: str) -> None:
 
 def _validate_semantics(
     *,
+    repo_root: Path,
     config: ValidatorConfig,
     planning_paths: set[str],
     tracking_paths: set[str],
-) -> None:
+) -> set[str]:
     if any(pattern.strip() == "**/*" for pattern in config.patching.allowed_update_globs):
         raise ConfigError(
             "patching.allowed_update_globs must not contain the unbounded pattern '**/*'"
         )
 
     all_docs = planning_paths | tracking_paths
-    patchable_docs = {
-        path
-        for path in all_docs
-        if _matches_any(path, config.patching.allowed_update_globs)
-        and not _matches_any(path, config.patching.forbidden_update_globs)
-    }
+    allowed_paths = _resolve_optional_globs(repo_root, config.patching.allowed_update_globs)
+    forbidden_paths = _resolve_optional_globs(repo_root, config.patching.forbidden_update_globs)
+    patchable_docs = (all_docs & allowed_paths) - forbidden_paths
     if not patchable_docs:
         raise ConfigError(
             "At least one planning/tracking file must match patching.allowed_update_globs "
             "without also matching patching.forbidden_update_globs",
         )
+    return patchable_docs
 
 
-def _matches_any(path: str, patterns: list[str]) -> bool:
-    return any(fnmatch(path, pattern) for pattern in patterns)
+def _resolve_optional_globs(repo_root: Path, patterns: list[str]) -> set[str]:
+    matches: set[str] = set()
+    for pattern in patterns:
+        resolved = glob.glob(pattern, root_dir=repo_root, recursive=True)
+        matches.update(
+            Path(match).as_posix() for match in resolved if (repo_root / match).is_file()
+        )
+    return matches
