@@ -7,6 +7,8 @@ from pydantic import ValidationError
 
 from planning_validator.models import (
     GitHubIssueState,
+    LocalDocument,
+    LocalDocumentInventory,
     LookbackConfig,
     PatchingConfig,
     PatchingProvider,
@@ -233,3 +235,27 @@ def test_recent_pull_request_rejects_naive_merged_at() -> None:
                 "url": "https://github.com/example/repo/pull/42",
             }
         )
+
+
+def test_local_document_computes_stable_content_digest() -> None:
+    document = LocalDocument.from_content(path="docs/roadmap.md", content="# Roadmap\n")
+
+    assert document.path == "docs/roadmap.md"
+    assert document.sha == "eae710439b6ab1e8e034479e4785fddf64058bbe4b746003e659498e618ae760"
+
+
+def test_local_document_inventory_exposes_deduped_views() -> None:
+    shared_document = LocalDocument.from_content(path="docs/shared.md", content="# Shared\n")
+    tracking_only_document = LocalDocument.from_content(path="docs/tasks.md", content="# Tasks\n")
+
+    inventory = LocalDocumentInventory(
+        planning_documents=[shared_document],
+        tracking_documents=[shared_document, tracking_only_document],
+    )
+
+    assert inventory.planning_paths == ["docs/shared.md"]
+    assert inventory.tracking_paths == ["docs/shared.md", "docs/tasks.md"]
+    assert [document.path for document in inventory.all_documents] == [
+        "docs/shared.md",
+        "docs/tasks.md",
+    ]
