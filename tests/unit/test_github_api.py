@@ -4,8 +4,9 @@ from datetime import UTC, datetime
 from urllib.parse import parse_qs
 
 import httpx
+import pytest
 
-from planning_validator.github_api import GitHubEvidenceClient
+from planning_validator.github_api import GitHubApiError, GitHubEvidenceClient
 from planning_validator.models import GitHubIssueState
 
 
@@ -241,3 +242,257 @@ def test_fetch_recent_merged_pull_requests_reads_multiple_pages() -> None:
     )
 
     assert [pull_request.number for pull_request in pull_requests] == [12]
+
+
+def test_client_context_manager_closes_underlying_http_client() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/acme/widgets/pulls":
+            return httpx.Response(200, json=[])
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        assert not client._client.is_closed
+
+    assert client._client.is_closed
+
+
+def test_fetch_recent_merged_pull_requests_rejects_naive_merged_since() -> None:
+    client = GitHubEvidenceClient(owner="acme", repo="widgets", token="token")
+
+    with pytest.raises(ValueError, match="timezone info"):
+        client.fetch_recent_merged_pull_requests(merged_since=datetime(2026, 4, 19))
+
+    client.close()
+
+
+def test_fetch_recent_merged_pull_requests_rejects_non_object_payloads() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/acme/widgets/pulls":
+            return httpx.Response(200, json=["unexpected"])
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    client = GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(GitHubApiError, match="pull request payload must be an object"):
+        client.fetch_recent_merged_pull_requests(merged_since=datetime(2026, 4, 19, tzinfo=UTC))
+
+
+def test_fetch_recent_merged_pull_requests_rejects_non_object_file_payloads() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/acme/widgets/pulls":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "number": 12,
+                        "title": "Recent merged change",
+                        "body": None,
+                        "merged_at": "2026-04-20T09:00:00Z",
+                        "html_url": "https://github.com/acme/widgets/pull/12",
+                        "labels": [],
+                        "user": {"login": "shay"},
+                    }
+                ],
+            )
+        if request.url.path == "/repos/acme/widgets/pulls/12/files":
+            return httpx.Response(200, json=["unexpected"])
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    client = GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(GitHubApiError, match="file payload must be an object"):
+        client.fetch_recent_merged_pull_requests(
+            merged_since=datetime(2026, 4, 19, tzinfo=UTC),
+            include_file_lists=True,
+        )
+
+
+def test_fetch_recent_merged_pull_requests_skips_blank_or_missing_file_names() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/acme/widgets/pulls":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "number": 12,
+                        "title": "Recent merged change",
+                        "body": None,
+                        "merged_at": "2026-04-20T09:00:00Z",
+                        "html_url": "https://github.com/acme/widgets/pull/12",
+                        "labels": [],
+                        "user": {"login": "shay"},
+                    }
+                ],
+            )
+        if request.url.path == "/repos/acme/widgets/pulls/12/files":
+            return httpx.Response(
+                200,
+                json=[
+                    {"filename": ""},
+                    {"filename": "docs/roadmap.md"},
+                    {"ignored": "missing filename"},
+                ],
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    client = GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    pull_requests = client.fetch_recent_merged_pull_requests(
+        merged_since=datetime(2026, 4, 19, tzinfo=UTC),
+        include_file_lists=True,
+    )
+
+    assert pull_requests[0].changed_files == ["docs/roadmap.md"]
+
+
+def test_fetch_recent_merged_pull_requests_skips_linked_pull_request_issues() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/acme/widgets/pulls":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "number": 12,
+                        "title": "Recent merged change",
+                        "body": "Fixes #44 and fixes #45.",
+                        "merged_at": "2026-04-20T09:00:00Z",
+                        "html_url": "https://github.com/acme/widgets/pull/12",
+                        "labels": [],
+                        "user": {"login": "shay"},
+                    }
+                ],
+            )
+        if request.url.path == "/repos/acme/widgets/issues/44":
+            return httpx.Response(
+                200,
+                json={
+                    "number": 44,
+                    "title": "Actual issue",
+                    "state": "open",
+                    "closed_at": None,
+                    "html_url": "https://github.com/acme/widgets/issues/44",
+                },
+            )
+        if request.url.path == "/repos/acme/widgets/issues/45":
+            return httpx.Response(
+                200,
+                json={
+                    "number": 45,
+                    "title": "Actually a PR",
+                    "state": "closed",
+                    "closed_at": "2026-04-20T07:30:00Z",
+                    "html_url": "https://github.com/acme/widgets/pull/45",
+                    "pull_request": {"url": "https://api.github.com/repos/acme/widgets/pulls/45"},
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    client = GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    pull_requests = client.fetch_recent_merged_pull_requests(
+        merged_since=datetime(2026, 4, 19, tzinfo=UTC),
+        include_linked_issues=True,
+    )
+
+    assert [issue.number for issue in pull_requests[0].linked_issues] == [44]
+
+
+def test_fetch_recent_merged_pull_requests_rejects_non_object_issue_payloads() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/acme/widgets/pulls":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "number": 12,
+                        "title": "Recent merged change",
+                        "body": "Fixes #44.",
+                        "merged_at": "2026-04-20T09:00:00Z",
+                        "html_url": "https://github.com/acme/widgets/pull/12",
+                        "labels": [],
+                        "user": {"login": "shay"},
+                    }
+                ],
+            )
+        if request.url.path == "/repos/acme/widgets/issues/44":
+            return httpx.Response(200, json=["unexpected"])
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    client = GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(GitHubApiError, match="issue payload must be an object"):
+        client.fetch_recent_merged_pull_requests(
+            merged_since=datetime(2026, 4, 19, tzinfo=UTC),
+            include_linked_issues=True,
+        )
+
+
+def test_get_json_wraps_http_errors() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"message": "boom"})
+
+    client = GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(GitHubApiError, match="GitHub API request failed"):
+        client.fetch_recent_merged_pull_requests(merged_since=datetime(2026, 4, 19, tzinfo=UTC))
+
+
+def test_fetch_recent_merged_pull_requests_rejects_non_list_top_level_payload() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/acme/widgets/pulls":
+            return httpx.Response(200, json={"unexpected": "object"})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    client = GitHubEvidenceClient(
+        owner="acme",
+        repo="widgets",
+        token="token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(GitHubApiError, match="returned non-list payload"):
+        client.fetch_recent_merged_pull_requests(merged_since=datetime(2026, 4, 19, tzinfo=UTC))
+
+
+def test_extract_linked_issue_numbers_returns_empty_for_missing_body() -> None:
+    client = GitHubEvidenceClient(owner="acme", repo="widgets", token="token")
+
+    assert client._extract_linked_issue_numbers(None) == []
+    assert client._extract_linked_issue_numbers("") == []
+
+    client.close()
