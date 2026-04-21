@@ -62,6 +62,15 @@ def test_prefix_gitignore_patterns_preserves_leading_spaces_and_skips_non_patter
     assert patterns == [" #not-a-comment"]
 
 
+def test_prefix_gitignore_patterns_skips_empty_anchored_nested_pattern() -> None:
+    patterns = _prefix_gitignore_patterns(
+        ["/"],
+        base_dir="docs",
+    )
+
+    assert patterns == []
+
+
 def test_gitignore_filter_matches_nested_slashless_patterns_in_descendants(tmp_path: Path) -> None:
     write_file(tmp_path / "docs/.gitignore", "*.md\n")
 

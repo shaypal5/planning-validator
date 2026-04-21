@@ -42,6 +42,7 @@ def create_repo_with_config(tmp_path: Path) -> Path:
 def test_resolve_repo_relative_globs_returns_sorted_deduped_matches(tmp_path: Path) -> None:
     write_file(tmp_path / "docs/b.md", "# B\n")
     write_file(tmp_path / "docs/a.md", "# A\n")
+    (tmp_path / "docs/subdir").mkdir(parents=True)
 
     matches = resolve_repo_relative_globs(tmp_path, ["docs/*.md", "docs/a.md"])
 
