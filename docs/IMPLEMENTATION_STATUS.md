@@ -7,6 +7,7 @@
 - Established the initial Python package, CLI skeleton, config models, tests, CI, examples, and repo tooling baseline.
 - Integrated `pr-agent-context` into repository CI and added a refresh workflow that uses append-mode managed comments with coverage artifact reuse.
 - Aligned `pr-agent-context` coverage reporting with the working downstream pattern: raw coverage upload in test jobs, combined XML/report artifacts in a dedicated coverage job, and XML-based patch coverage input for comment rendering.
+- Hardened the `pr-agent-context` refresh workflow with the approval-gated fallback pattern from `v4.0.19`, including scheduled fan-out dispatch, explicit PR SHA overrides, and same-head dispatch dedupe for same-repo PRs.
 
 ## Remaining
 
