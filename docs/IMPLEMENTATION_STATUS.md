@@ -3,6 +3,7 @@
 ## Completed
 
 - Milestone 1 complete: scaffolding and config validation baseline established.
+- `P-M2B` complete: shared repo-relative glob resolution, `.gitignore` filtering, and local planning/tracking document inventory loading are now implemented with unit coverage.
 - Read and locked to the v1 design docs in `docs/`.
 - Established the initial Python package, CLI skeleton, config models, tests, CI, examples, and repo tooling baseline.
 - Integrated `pr-agent-context` into repository CI and added a refresh workflow that uses append-mode managed comments with coverage artifact reuse.
@@ -26,7 +27,8 @@
   - `P-M2B`: local planning/tracking file inventory plus gitignore and path filtering.
   - `P-M2C`: repository snapshot assembly that combines local files with GitHub evidence.
 - `P-M2A` is complete.
-- `P-M2B` is the next implementation slice in progress.
+- `P-M2B` is complete.
+- `P-M2C` is the next implementation slice in progress.
 
 ## Decisions
 

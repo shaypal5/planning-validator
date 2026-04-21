@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from hashlib import sha256
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 
 class PatchingProvider(StrEnum):
@@ -180,6 +181,43 @@ class RecentPullRequest(BaseModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("must include timezone info")
         return value
+
+
+class LocalDocument(BaseModel):
+    path: str = Field(min_length=1)
+    content: str
+    sha: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @classmethod
+    def from_content(cls, *, path: str, content: str) -> LocalDocument:
+        return cls(path=path, content=content, sha=sha256(content.encode("utf-8")).hexdigest())
+
+
+class LocalDocumentInventory(BaseModel):
+    planning_documents: list[LocalDocument] = Field(default_factory=list)
+    tracking_documents: list[LocalDocument] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @computed_field
+    @property
+    def all_documents(self) -> list[LocalDocument]:
+        documents_by_path: dict[str, LocalDocument] = {}
+        for document in [*self.planning_documents, *self.tracking_documents]:
+            documents_by_path.setdefault(document.path, document)
+        return list(documents_by_path.values())
+
+    @computed_field
+    @property
+    def planning_paths(self) -> list[str]:
+        return [document.path for document in self.planning_documents]
+
+    @computed_field
+    @property
+    def tracking_paths(self) -> list[str]:
+        return [document.path for document in self.tracking_documents]
 
 
 class ValidatorConfig(BaseModel):

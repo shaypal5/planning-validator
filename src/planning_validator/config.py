@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import glob
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
 
+from planning_validator.file_io import resolve_repo_relative_globs
 from planning_validator.models import ValidatorConfig
 
 
@@ -76,7 +76,10 @@ def load_config(config_path: str | Path, repo_root: str | Path | None = None) ->
 def _resolve_globs(repo_root: Path, patterns: list[str], *, field_name: str) -> set[str]:
     matches: set[str] = set()
     for pattern in patterns:
-        file_matches = _resolve_pattern_matches(repo_root, pattern)
+        try:
+            file_matches = resolve_repo_relative_globs(repo_root, [pattern])
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
         if not file_matches:
             raise ConfigError(f"{field_name} pattern matched no files: {pattern}")
         matches.update(file_matches)
@@ -118,24 +121,7 @@ def _validate_semantics(
 
 
 def _resolve_optional_globs(repo_root: Path, patterns: list[str]) -> set[str]:
-    matches: set[str] = set()
-    for pattern in patterns:
-        matches.update(_resolve_pattern_matches(repo_root, pattern))
-    return matches
-
-
-def _resolve_pattern_matches(repo_root: Path, pattern: str) -> set[str]:
-    pattern_path = Path(pattern)
-    if pattern_path.is_absolute():
-        raise ConfigError(f"Glob pattern must be relative to the repository root: {pattern}")
-    if ".." in pattern_path.parts:
-        raise ConfigError(f"Glob pattern must not traverse outside the repository root: {pattern}")
-
-    matches: set[str] = set()
-    for match in glob.glob(pattern, root_dir=repo_root, recursive=True):
-        resolved_path = (repo_root / match).resolve()
-        if not resolved_path.is_relative_to(repo_root):
-            raise ConfigError(f"Glob match escaped the repository root: {pattern}")
-        if resolved_path.is_file():
-            matches.add(resolved_path.relative_to(repo_root).as_posix())
-    return matches
+    try:
+        return set(resolve_repo_relative_globs(repo_root, patterns))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
