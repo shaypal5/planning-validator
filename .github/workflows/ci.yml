@@ -1,4 +1,4 @@
-name: ci
+name: CI
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +22,62 @@ jobs:
         run: ruff check .
       - name: Format check
         run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      COVERAGE_FILE: .coverage.py312
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
       - name: Test
         run: coverage run -m pytest
-      - name: Coverage report
-        run: coverage report
+      - name: Coverage reporting
+        run: |
+          coverage xml -o coverage.xml
+          coverage report | tee coverage-report.txt
+      - name: Upload raw coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-agent-context-coverage-py312
+          path: .coverage.py312
+          include-hidden-files: true
+          if-no-files-found: ignore
+      - name: Upload coverage report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-agent-context-coverage-report
+          path: |
+            coverage.xml
+            coverage-report.txt
+          if-no-files-found: ignore
+
+  pr-agent-context:
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs:
+      - lint
+      - test
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    uses: shaypal5/pr-agent-context/.github/workflows/pr-agent-context.yml@v4
+    with:
+      tool_ref: v4
+      target_patch_coverage: "100"
+      include_patch_coverage: true
+      coverage_artifact_prefix: pr-agent-context-coverage
+      coverage_report_artifact_name: pr-agent-context-coverage-report
+      prompt_template_file: .github/pr-agent-context-template.md
+      debug_artifacts: true

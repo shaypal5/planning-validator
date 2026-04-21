@@ -28,3 +28,18 @@ planning-validator validate-config --config .github/planning-validator.yml
 
 The `detect`, `patch`, and `run` commands are reserved for later milestones from
 [`docs/05_implementation_plan.md`](./docs/05_implementation_plan.md).
+
+## PR Agent Context
+
+This repository now integrates
+[`shaypal5/pr-agent-context`](https://github.com/shaypal5/pr-agent-context) as a downstream
+consumer for PR handoff comments and patch-coverage feedback.
+
+- [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) uploads raw `coverage.py` data with the
+  `pr-agent-context-coverage` prefix and also uploads `coverage.xml` plus `coverage-report.txt`
+  as `pr-agent-context-coverage-report`.
+- [`.github/workflows/pr-agent-context-refresh.yml`](./.github/workflows/pr-agent-context-refresh.yml)
+  provides the later-lifecycle refresh path and uses `execution_mode: refresh` with
+  `publish_mode: append`.
+- [`.github/pr-agent-context-template.md`](./.github/pr-agent-context-template.md) supplies the
+  repository-specific prompt template used by both flows.

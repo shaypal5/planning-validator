@@ -31,6 +31,8 @@ examples/
 - Main user command: `planning-validator validate-config --config .github/planning-validator.yml`
 - CI workflow: `.github/workflows/ci.yml`
 - Reusable workflow stub: `.github/workflows/reusable-planning-validator.yml`
+- PR agent refresh workflow: `.github/workflows/pr-agent-context-refresh.yml`
+- PR agent prompt template: `.github/pr-agent-context-template.md`
 - Pre-commit hooks: `.pre-commit-config.yaml`
 
 ## Repository configuration and examples
