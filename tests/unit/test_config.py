@@ -264,6 +264,28 @@ def test_load_config_rejects_absolute_pattern(tmp_path: Path) -> None:
         load_config(tmp_path / ".github/planning-validator.yml", repo_root=tmp_path)
 
 
+def test_load_config_wraps_invalid_optional_glob_patterns(tmp_path: Path) -> None:
+    write_file(tmp_path / "README.md", "# Example repo\n")
+    write_file(
+        tmp_path / ".github/planning-validator.yml",
+        f"""
+        schema_version: v1alpha1
+        planning_files:
+          - README.md
+        patching:
+          provider: openai
+          model: gpt-5.4-thinking
+          allowed_update_globs:
+            - README.md
+          forbidden_update_globs:
+            - {tmp_path / "README.md"}
+        """,
+    )
+
+    with pytest.raises(ConfigError, match="must be relative to the repository root"):
+        load_config(tmp_path / ".github/planning-validator.yml", repo_root=tmp_path)
+
+
 def test_validate_config_cli_reports_success(tmp_path: Path) -> None:
     config_path = create_valid_repo(tmp_path)
 

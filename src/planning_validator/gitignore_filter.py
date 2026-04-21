@@ -40,22 +40,34 @@ def _prefix_gitignore_patterns(lines: list[str], *, base_dir: str) -> list[str]:
         if not line or line.isspace():
             continue
 
-        stripped = line.lstrip()
-        if stripped.startswith("#"):
+        if line.startswith("#"):
             continue
 
-        is_negated = stripped.startswith("!")
-        body = stripped[1:] if is_negated else stripped
+        is_negated = line.startswith("!")
+        body = line[1:] if is_negated else line
         if not body:
             continue
 
         if base_dir in {"", "."}:
-            prefixed_patterns.append(stripped)
+            prefixed_patterns.append(line)
             continue
 
-        normalized_body = body.lstrip("/") if body.startswith("/") else body
+        is_anchored = body.startswith("/")
+        normalized_body = body[1:] if is_anchored else body
+        if not normalized_body:
+            continue
+
         prefix = f"{base_dir}/"
-        candidate = f"{prefix}{normalized_body}"
-        prefixed_patterns.append(f"!{candidate}" if is_negated else candidate)
+        candidates: list[str]
+        if is_anchored or "/" in normalized_body:
+            candidates = [f"{prefix}{normalized_body}"]
+        else:
+            candidates = [
+                f"{prefix}{normalized_body}",
+                f"{prefix}**/{normalized_body}",
+            ]
+
+        for candidate in candidates:
+            prefixed_patterns.append(f"!{candidate}" if is_negated else candidate)
 
     return prefixed_patterns

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import textwrap
 from pathlib import Path
 
@@ -50,6 +51,15 @@ def test_resolve_repo_relative_globs_returns_sorted_deduped_matches(tmp_path: Pa
 def test_resolve_repo_relative_globs_rejects_root_escape_patterns(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="must not traverse outside the repository root"):
         resolve_repo_relative_globs(tmp_path, ["../outside.md"])
+
+
+def test_resolve_repo_relative_globs_rejects_matches_that_escape_repo_root(tmp_path: Path) -> None:
+    outside_file = tmp_path.parent / "outside.md"
+    outside_file.write_text("outside\n", encoding="utf-8")
+    os.symlink(outside_file, tmp_path / "docs-link.md")
+
+    with pytest.raises(ValueError, match="escaped the repository root"):
+        resolve_repo_relative_globs(tmp_path, ["docs-link.md"])
 
 
 def test_read_local_document_inventory_loads_and_dedupes_documents(tmp_path: Path) -> None:
