@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   run:
-    uses: shaypal5/planning-validator/.github/workflows/reusable-planning-validator.yml@v1
+    uses: shaypal5/planning-validator/.github/workflows/reusable-planning-validator.yml@main
     with:
       config_path: .github/planning-validator.yml
     secrets:

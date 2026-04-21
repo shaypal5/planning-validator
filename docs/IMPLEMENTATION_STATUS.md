@@ -2,7 +2,7 @@
 
 ## Completed
 
-- Milestone 1 in progress on branch `codex/m1-scaffold-config`.
+- Milestone 1 complete: scaffolding and config validation baseline established.
 - Read and locked to the v1 design docs in `docs/`.
 - Established the initial Python package, CLI skeleton, config models, tests, CI, examples, and repo tooling baseline.
 - Integrated `pr-agent-context` into repository CI and added a refresh workflow that uses append-mode managed comments with coverage artifact reuse.

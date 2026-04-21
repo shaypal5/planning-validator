@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import runpy
 import textwrap
 from pathlib import Path
 
@@ -83,6 +84,11 @@ def test_load_config_rejects_missing_required_fields(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="patching"):
         load_config(tmp_path / ".github/planning-validator.yml", repo_root=tmp_path)
+
+
+def test_load_config_rejects_missing_config_file(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="Config file not found"):
+        load_config(tmp_path / ".github/missing.yml", repo_root=tmp_path)
 
 
 def test_load_config_rejects_missing_repo_root(tmp_path: Path) -> None:
@@ -218,6 +224,46 @@ def test_load_config_uses_glob_semantics_for_patchable_paths(tmp_path: Path) -> 
     assert resolved.patchable_paths == ("docs/roadmap.md",)
 
 
+def test_load_config_rejects_parent_traversal_pattern(tmp_path: Path) -> None:
+    write_file(tmp_path / "docs/roadmap.md", "# Roadmap\n")
+    write_file(
+        tmp_path / ".github/planning-validator.yml",
+        """
+        schema_version: v1alpha1
+        planning_files:
+          - ../outside.md
+        patching:
+          provider: openai
+          model: gpt-5.4-thinking
+          allowed_update_globs:
+            - docs/**/*.md
+        """,
+    )
+
+    with pytest.raises(ConfigError, match="must not traverse outside the repository root"):
+        load_config(tmp_path / ".github/planning-validator.yml", repo_root=tmp_path)
+
+
+def test_load_config_rejects_absolute_pattern(tmp_path: Path) -> None:
+    write_file(tmp_path / "docs/roadmap.md", "# Roadmap\n")
+    write_file(
+        tmp_path / ".github/planning-validator.yml",
+        f"""
+        schema_version: v1alpha1
+        planning_files:
+          - {tmp_path / "docs/roadmap.md"}
+        patching:
+          provider: openai
+          model: gpt-5.4-thinking
+          allowed_update_globs:
+            - docs/**/*.md
+        """,
+    )
+
+    with pytest.raises(ConfigError, match="must be relative to the repository root"):
+        load_config(tmp_path / ".github/planning-validator.yml", repo_root=tmp_path)
+
+
 def test_validate_config_cli_reports_success(tmp_path: Path) -> None:
     config_path = create_valid_repo(tmp_path)
 
@@ -280,6 +326,26 @@ def test_validate_config_cli_excludes_forbidden_files_from_patchable_output(tmp_
     assert payload["patchable_files"] == ["docs/roadmap.md"]
 
 
+def test_validate_config_cli_reports_success_as_text(tmp_path: Path) -> None:
+    config_path = create_valid_repo(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "validate-config",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Config is valid." in result.stdout
+    assert "Planning files: 2" in result.stdout
+    assert "Tracking files: 0" in result.stdout
+
+
 def test_validate_config_cli_reports_config_errors_as_json(tmp_path: Path) -> None:
     write_file(
         tmp_path / ".github/planning-validator.yml",
@@ -309,6 +375,31 @@ def test_validate_config_cli_reports_config_errors_as_json(tmp_path: Path) -> No
     assert "patching" in payload["error"]
 
 
+def test_validate_config_cli_reports_config_errors_as_text(tmp_path: Path) -> None:
+    write_file(
+        tmp_path / ".github/planning-validator.yml",
+        """
+        schema_version: v1alpha1
+        planning_files:
+          - README.md
+        """,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "validate-config",
+            "--config",
+            str(tmp_path / ".github/planning-validator.yml"),
+            "--repo-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Config validation failed:" in result.stderr
+
+
 def test_validate_config_cli_rejects_missing_repo_root_before_loader(tmp_path: Path) -> None:
     config_path = create_valid_repo(tmp_path)
 
@@ -325,3 +416,14 @@ def test_validate_config_cli_rejects_missing_repo_root_before_loader(tmp_path: P
 
     assert result.exit_code == 2
     assert "does not exist" in result.output
+
+
+def test_cli_module_runs_app_when_executed_as_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        "typer.main.Typer.__call__", lambda self, *args, **kwargs: calls.append("called")
+    )
+    runpy.run_module("planning_validator.cli", run_name="__main__")
+
+    assert calls == ["called"]

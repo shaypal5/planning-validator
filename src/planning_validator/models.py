@@ -84,10 +84,12 @@ class PatchingConfig(BaseModel):
             raise ValueError("must be between 0 and 2")
         return value
 
-    @field_validator("allowed_update_globs", "forbidden_update_globs")
+    @field_validator("allowed_update_globs", "forbidden_update_globs", mode="before")
     @classmethod
-    def validate_glob_strings(cls, globs: list[str]) -> list[str]:
-        if any(not isinstance(glob, str) or not glob.strip() for glob in globs):
+    def validate_glob_strings(cls, globs: object) -> object:
+        if not isinstance(globs, list) or any(
+            not isinstance(glob, str) or not glob.strip() for glob in globs
+        ):
             raise ValueError("all glob entries must be non-empty strings")
         return globs
 
@@ -154,9 +156,11 @@ class ValidatorConfig(BaseModel):
             raise ValueError("schema_version must be 'v1alpha1'")
         return value
 
-    @field_validator("planning_files", "tracking_files")
+    @field_validator("planning_files", "tracking_files", mode="before")
     @classmethod
-    def validate_glob_lists(cls, globs: list[str]) -> list[str]:
-        if any(not isinstance(glob, str) or not glob.strip() for glob in globs):
+    def validate_glob_lists(cls, globs: object) -> object:
+        if not isinstance(globs, list) or any(
+            not isinstance(glob, str) or not glob.strip() for glob in globs
+        ):
             raise ValueError("all glob entries must be non-empty strings")
         return globs

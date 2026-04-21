@@ -48,6 +48,13 @@ def test_lookback_config_rejects_invalid_values(payload: dict[str, int], match: 
         LookbackConfig.model_validate(payload)
 
 
+def test_lookback_config_accepts_positive_values() -> None:
+    config = LookbackConfig.model_validate({"merged_pr_hours": 1, "commit_hours": 2})
+
+    assert config.merged_pr_hours == 1
+    assert config.commit_hours == 2
+
+
 @pytest.mark.parametrize(
     ("payload", "match"),
     [
@@ -61,6 +68,13 @@ def test_staleness_config_rejects_invalid_values(
 ) -> None:
     with pytest.raises(ValidationError, match=match):
         StalenessConfig.model_validate(payload)
+
+
+def test_staleness_config_accepts_boundary_values() -> None:
+    config = StalenessConfig.model_validate({"min_signal_score": 0, "max_files_to_update": 1})
+
+    assert config.min_signal_score == 0
+    assert config.max_files_to_update == 1
 
 
 @pytest.mark.parametrize(
@@ -102,6 +116,14 @@ def test_staleness_config_rejects_invalid_values(
             },
             "non-empty strings",
         ),
+        (
+            {
+                "provider": "openai",
+                "model": "gpt-5.4-thinking",
+                "allowed_update_globs": [123],
+            },
+            "non-empty strings",
+        ),
     ],
 )
 def test_patching_config_rejects_invalid_values(
@@ -110,6 +132,19 @@ def test_patching_config_rejects_invalid_values(
 ) -> None:
     with pytest.raises(ValidationError, match=match):
         PatchingConfig.model_validate(payload)
+
+
+def test_patching_config_accepts_boundary_temperature() -> None:
+    config = PatchingConfig.model_validate(
+        {
+            "provider": "openai",
+            "model": "gpt-5.4-thinking",
+            "allowed_update_globs": ["README.md"],
+            "temperature": 2,
+        }
+    )
+
+    assert config.temperature == 2
 
 
 def test_validator_config_rejects_invalid_schema_and_globs() -> None:
@@ -130,7 +165,7 @@ def test_validator_config_rejects_invalid_schema_and_globs() -> None:
         ValidatorConfig.model_validate(
             {
                 "schema_version": "v1alpha1",
-                "planning_files": [""],
+                "planning_files": [123],
                 "patching": {
                     "provider": "openai",
                     "model": "gpt-5.4-thinking",
