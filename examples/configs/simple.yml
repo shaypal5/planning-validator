@@ -1,0 +1,15 @@
+schema_version: v1alpha1
+
+planning_files:
+  - README.md
+  - docs/roadmap.md
+
+tracking_files:
+  - docs/tasks.md
+
+patching:
+  provider: openai
+  model: gpt-5.4-thinking
+  allowed_update_globs:
+    - README.md
+    - docs/**/*.md

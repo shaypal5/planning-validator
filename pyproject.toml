@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "planning-validator"
+version = "0.1.0"
+description = "GitHub-native validator for stale planning and tracking markdown documentation."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+  { name = "Shay Palachy" },
+]
+dependencies = [
+  "httpx>=0.28,<1",
+  "pydantic>=2.11,<3",
+  "PyYAML>=6.0.2,<7",
+  "typer>=0.16,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "coverage[toml]>=7.8,<8",
+  "pytest>=8.3,<9",
+  "ruff>=0.11.0,<0.12",
+]
+
+[project.scripts]
+planning-validator = "planning_validator.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/planning_validator"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["planning_validator"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "UP",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
