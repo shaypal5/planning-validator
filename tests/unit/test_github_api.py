@@ -14,34 +14,27 @@ from planning_validator.models import GitHubIssueState
 def test_fetch_recent_merged_pull_requests_normalizes_and_filters_by_merged_at() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/repos/acme/widgets/pulls":
-            page = parse_qs(request.url.query.decode()).get("page", ["1"])[0]
-            if page == "1":
-                return httpx.Response(
-                    200,
-                    json=[
-                        {
-                            "number": 12,
-                            "title": "Recent merged change",
-                            "body": "Implements the first half.",
-                            "merged_at": "2026-04-20T09:00:00Z",
-                            "html_url": "https://github.com/acme/widgets/pull/12",
-                            "labels": [{"name": "feature"}, {"name": "backend"}],
-                            "user": {"login": "shay"},
-                        },
-                        {
-                            "number": 11,
-                            "title": "Closed but not merged",
-                            "body": None,
-                            "merged_at": None,
-                            "html_url": "https://github.com/acme/widgets/pull/11",
-                            "labels": [],
-                            "user": {"login": "shay"},
-                        },
-                    ],
-                )
             return httpx.Response(
                 200,
                 json=[
+                    {
+                        "number": 12,
+                        "title": "Recent merged change",
+                        "body": "Implements the first half.",
+                        "merged_at": "2026-04-20T09:00:00Z",
+                        "html_url": "https://github.com/acme/widgets/pull/12",
+                        "labels": [{"name": "feature"}, {"name": "backend"}],
+                        "user": {"login": "shay"},
+                    },
+                    {
+                        "number": 11,
+                        "title": "Closed but not merged",
+                        "body": None,
+                        "merged_at": None,
+                        "html_url": "https://github.com/acme/widgets/pull/11",
+                        "labels": [],
+                        "user": {"login": "shay"},
+                    },
                     {
                         "number": 10,
                         "title": "Older merged change",
@@ -50,7 +43,7 @@ def test_fetch_recent_merged_pull_requests_normalizes_and_filters_by_merged_at()
                         "html_url": "https://github.com/acme/widgets/pull/10",
                         "labels": [{"name": "feature"}],
                         "user": {"login": "older"},
-                    }
+                    },
                 ],
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
@@ -245,8 +238,20 @@ def test_fetch_recent_merged_pull_requests_reads_multiple_pages() -> None:
     assert [pull_request.number for pull_request in pull_requests] == [12]
 
 
-def test_fetch_recent_merged_pull_requests_stops_after_first_older_merged_pr() -> None:
+def test_fetch_recent_merged_pull_requests_keeps_scanning_after_older_merged_pr() -> None:
     page_requests: list[str] = []
+    first_page = [
+        {
+            "number": number,
+            "title": f"Closed but not merged {number}",
+            "body": None,
+            "merged_at": None,
+            "html_url": f"https://github.com/acme/widgets/pull/{number}",
+            "labels": [],
+            "user": {"login": "shay"},
+        }
+        for number in range(100, 198)
+    ]
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/repos/acme/widgets/pulls":
@@ -274,9 +279,25 @@ def test_fetch_recent_merged_pull_requests_stops_after_first_older_merged_pr() -
                             "labels": [],
                             "user": {"login": "shay"},
                         },
+                        *first_page,
                     ],
                 )
-            raise AssertionError("Pagination should stop before requesting page 2")
+            if page == "2":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "number": 10,
+                            "title": "Recently updated merged change",
+                            "body": None,
+                            "merged_at": "2026-04-20T10:00:00Z",
+                            "html_url": "https://github.com/acme/widgets/pull/10",
+                            "labels": [],
+                            "user": {"login": "shay"},
+                        }
+                    ],
+                )
+            raise AssertionError(f"Unexpected page request: {page}")
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     client = GitHubEvidenceClient(
@@ -290,8 +311,8 @@ def test_fetch_recent_merged_pull_requests_stops_after_first_older_merged_pr() -
         merged_since=datetime(2026, 4, 19, tzinfo=UTC)
     )
 
-    assert [pull_request.number for pull_request in pull_requests] == [12]
-    assert page_requests == ["1"]
+    assert [pull_request.number for pull_request in pull_requests] == [10, 12]
+    assert page_requests == ["1", "2"]
 
 
 def test_client_context_manager_closes_underlying_http_client() -> None:
@@ -416,6 +437,8 @@ def test_fetch_recent_merged_pull_requests_skips_blank_or_missing_file_names() -
 
 
 def test_fetch_recent_merged_pull_requests_skips_linked_pull_request_issues() -> None:
+    issue_requests: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/repos/acme/widgets/pulls":
             return httpx.Response(
@@ -424,7 +447,7 @@ def test_fetch_recent_merged_pull_requests_skips_linked_pull_request_issues() ->
                     {
                         "number": 12,
                         "title": "Recent merged change",
-                        "body": "Fixes #44 and fixes #45.",
+                        "body": "Fixes #44 and fixes #45. Fixes #45 again.",
                         "merged_at": "2026-04-20T09:00:00Z",
                         "html_url": "https://github.com/acme/widgets/pull/12",
                         "labels": [],
@@ -433,6 +456,7 @@ def test_fetch_recent_merged_pull_requests_skips_linked_pull_request_issues() ->
                 ],
             )
         if request.url.path == "/repos/acme/widgets/issues/44":
+            issue_requests.append(request.url.path)
             return httpx.Response(
                 200,
                 json={
@@ -444,6 +468,7 @@ def test_fetch_recent_merged_pull_requests_skips_linked_pull_request_issues() ->
                 },
             )
         if request.url.path == "/repos/acme/widgets/issues/45":
+            issue_requests.append(request.url.path)
             return httpx.Response(
                 200,
                 json={
@@ -470,6 +495,10 @@ def test_fetch_recent_merged_pull_requests_skips_linked_pull_request_issues() ->
     )
 
     assert [issue.number for issue in pull_requests[0].linked_issues] == [44]
+    assert issue_requests == [
+        "/repos/acme/widgets/issues/44",
+        "/repos/acme/widgets/issues/45",
+    ]
 
 
 def test_fetch_recent_merged_pull_requests_rejects_non_object_issue_payloads() -> None:

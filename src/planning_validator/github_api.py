@@ -77,7 +77,7 @@ class GitHubEvidenceClient:
 
             pull_request = self._normalize_pull_request(payload)
             if pull_request.merged_at < merged_since:
-                break
+                continue
 
             if include_file_lists:
                 pull_request = pull_request.model_copy(
@@ -114,11 +114,11 @@ class GitHubEvidenceClient:
             if issue_number in seen_numbers:
                 continue
 
+            seen_numbers.add(issue_number)
             issue = self._fetch_issue(issue_number)
             if issue is None:
                 continue
 
-            seen_numbers.add(issue_number)
             linked_issues.append(issue)
 
         return linked_issues
