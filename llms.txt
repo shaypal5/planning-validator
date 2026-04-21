@@ -1,0 +1,58 @@
+# planning-validator agent index
+
+## Core tree
+
+```text
+src/
+  planning_validator/
+    __init__.py
+    cli.py
+    config.py
+    models.py
+tests/
+  unit/
+docs/
+examples/
+  configs/
+  target-repo/
+.github/
+  workflows/
+```
+
+## Core package entrypoints
+
+- CLI entrypoint: `src/planning_validator/cli.py`
+- Config loading and semantic validation: `src/planning_validator/config.py`
+- Shared typed schemas and enums: `src/planning_validator/models.py`
+- Package metadata and tool config: `pyproject.toml`
+
+## Runtime and validation surfaces
+
+- Main user command: `planning-validator validate-config --config .github/planning-validator.yml`
+- CI workflow: `.github/workflows/ci.yml`
+- Reusable workflow stub: `.github/workflows/reusable-planning-validator.yml`
+- PR agent refresh workflow: `.github/workflows/pr-agent-context-refresh.yml`
+- PR agent prompt template: `.github/pr-agent-context-template.md`
+- Pre-commit hooks: `.pre-commit-config.yaml`
+
+## Repository configuration and examples
+
+- Example validator config: `examples/configs/simple.yml`
+- Example monorepo config: `examples/configs/monorepo.yml`
+- Example consumer config: `examples/target-repo/.github/planning-validator.yml`
+- Example consumer workflow: `examples/target-repo/.github/workflows/planning-validator.yml`
+
+## Design and contract docs
+
+- Source-of-truth doc bundle: `docs/README_bundle.md`
+- Project scope and boundaries: `docs/00_project_overview.md`
+- System architecture: `docs/01_system_architecture.md`
+- Config schema contract: `docs/02_config_schema.md`
+- Detector contract: `docs/03_detector_contract.md`
+- Patcher and PR contract: `docs/04_patcher_pr_contract.md`
+- Implementation plan: `docs/05_implementation_plan.md`
+- Current high-level implementation status: `docs/IMPLEMENTATION_STATUS.md`
+
+## Immediate state pointer
+
+- Short-lived execution state for agents: `.agent-plan.md`
