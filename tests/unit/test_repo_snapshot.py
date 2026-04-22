@@ -3,7 +3,7 @@ from __future__ import annotations
 import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
-from subprocess import CompletedProcess
+from subprocess import CalledProcessError, CompletedProcess
 
 import pytest
 
@@ -306,3 +306,213 @@ def test_collect_repo_metadata_reads_local_git_state(
         default_branch="main",
         head_sha="abc123",
     )
+
+
+def test_collect_repo_metadata_falls_back_to_current_branch_when_origin_head_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    outputs = {
+        ("rev-parse", "HEAD"): "abc123\n",
+        ("branch", "--show-current"): "feature/snapshot\n",
+        ("config", "--get", "remote.origin.url"): "git@github.com:acme/widgets.git\n",
+    }
+
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> CompletedProcess[str]:
+        assert cwd == tmp_path
+        key = tuple(args[1:])
+        if key == ("symbolic-ref", "refs/remotes/origin/HEAD"):
+            raise CalledProcessError(returncode=1, cmd=args, stderr="fatal: ref missing\n")
+        return CompletedProcess(args=args, returncode=0, stdout=outputs[key], stderr="")
+
+    monkeypatch.setattr("planning_validator.repo_snapshot.subprocess.run", fake_run)
+
+    metadata = collect_repo_metadata(tmp_path)
+
+    assert metadata.default_branch == "feature/snapshot"
+
+
+def test_collect_repo_metadata_falls_back_to_abbrev_ref_when_show_current_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    outputs = {
+        ("rev-parse", "HEAD"): "abc123\n",
+        ("branch", "--show-current"): "\n",
+        ("rev-parse", "--abbrev-ref", "HEAD"): "main\n",
+        ("config", "--get", "remote.origin.url"): "git@github.com:acme/widgets.git\n",
+    }
+
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> CompletedProcess[str]:
+        assert cwd == tmp_path
+        key = tuple(args[1:])
+        if key == ("symbolic-ref", "refs/remotes/origin/HEAD"):
+            raise CalledProcessError(returncode=1, cmd=args, stderr="fatal: ref missing\n")
+        return CompletedProcess(args=args, returncode=0, stdout=outputs[key], stderr="")
+
+    monkeypatch.setattr("planning_validator.repo_snapshot.subprocess.run", fake_run)
+
+    metadata = collect_repo_metadata(tmp_path)
+
+    assert metadata.default_branch == "main"
+
+
+def test_collect_repo_metadata_raises_clear_error_when_no_default_branch_can_be_derived(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    outputs = {
+        ("rev-parse", "HEAD"): "abc123\n",
+        ("branch", "--show-current"): "\n",
+        ("rev-parse", "--abbrev-ref", "HEAD"): "HEAD\n",
+        ("config", "--get", "remote.origin.url"): "git@github.com:acme/widgets.git\n",
+    }
+
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> CompletedProcess[str]:
+        assert cwd == tmp_path
+        key = tuple(args[1:])
+        if key == ("symbolic-ref", "refs/remotes/origin/HEAD"):
+            raise CalledProcessError(returncode=1, cmd=args, stderr="fatal: ref missing\n")
+        return CompletedProcess(args=args, returncode=0, stdout=outputs[key], stderr="")
+
+    monkeypatch.setattr("planning_validator.repo_snapshot.subprocess.run", fake_run)
+
+    with pytest.raises(ValueError, match="Could not resolve default branch"):
+        collect_repo_metadata(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("remote_url", "expected_repo"),
+    [
+        ("https://github.com/acme/widgets.git", "acme/widgets"),
+        ("ssh://git@github.com/acme/widgets.git", "acme/widgets"),
+        ("git@github.com:acme/widgets.git", "acme/widgets"),
+    ],
+)
+def test_collect_repo_metadata_normalizes_common_remote_url_forms(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    remote_url: str,
+    expected_repo: str,
+) -> None:
+    outputs = {
+        ("rev-parse", "HEAD"): "abc123\n",
+        ("symbolic-ref", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n",
+        ("config", "--get", "remote.origin.url"): f"{remote_url}\n",
+    }
+
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> CompletedProcess[str]:
+        assert cwd == tmp_path
+        return CompletedProcess(args=args, returncode=0, stdout=outputs[tuple(args[1:])], stderr="")
+
+    monkeypatch.setattr("planning_validator.repo_snapshot.subprocess.run", fake_run)
+
+    metadata = collect_repo_metadata(tmp_path)
+
+    assert metadata.repo == expected_repo
+
+
+@pytest.mark.parametrize(
+    "remote_url",
+    [
+        "",
+        "widgets.git",
+        "https://github.com/acme",
+    ],
+)
+def test_collect_repo_metadata_rejects_unparseable_remote_urls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    remote_url: str,
+) -> None:
+    outputs = {
+        ("rev-parse", "HEAD"): "abc123\n",
+        ("symbolic-ref", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n",
+        ("config", "--get", "remote.origin.url"): f"{remote_url}\n",
+    }
+
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> CompletedProcess[str]:
+        assert cwd == tmp_path
+        return CompletedProcess(args=args, returncode=0, stdout=outputs[tuple(args[1:])], stderr="")
+
+    monkeypatch.setattr("planning_validator.repo_snapshot.subprocess.run", fake_run)
+
+    with pytest.raises(ValueError, match="Could not derive repository name"):
+        collect_repo_metadata(tmp_path)
+
+
+def test_collect_repo_metadata_uses_stderr_when_git_command_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> CompletedProcess[str]:
+        assert cwd == tmp_path
+        raise CalledProcessError(returncode=1, cmd=args, stderr="fatal: not a git repository\n")
+
+    monkeypatch.setattr("planning_validator.repo_snapshot.subprocess.run", fake_run)
+
+    with pytest.raises(ValueError, match="fatal: not a git repository"):
+        collect_repo_metadata(tmp_path)
+
+
+def test_collect_repo_metadata_falls_back_to_generic_git_error_when_stderr_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> CompletedProcess[str]:
+        assert cwd == tmp_path
+        raise CalledProcessError(returncode=1, cmd=args, stderr="")
+
+    monkeypatch.setattr("planning_validator.repo_snapshot.subprocess.run", fake_run)
+
+    with pytest.raises(ValueError, match=r"git rev-parse HEAD failed"):
+        collect_repo_metadata(tmp_path)

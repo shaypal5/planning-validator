@@ -107,8 +107,25 @@ def _resolve_current_time(now: datetime | None) -> datetime:
 
 
 def _resolve_default_branch(repo_root: Path) -> str:
-    symbolic_ref = _git_stdout(repo_root, "symbolic-ref", "refs/remotes/origin/HEAD")
-    return symbolic_ref.rsplit("/", maxsplit=1)[-1]
+    symbolic_ref = _try_git_stdout(repo_root, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if symbolic_ref:
+        return symbolic_ref.rsplit("/", maxsplit=1)[-1]
+
+    current_branch = _try_git_stdout(repo_root, "branch", "--show-current")
+    if current_branch:
+        return current_branch
+
+    abbrev_ref = _try_git_stdout(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
+    if abbrev_ref and abbrev_ref != "HEAD":
+        return abbrev_ref
+
+    raise ValueError(
+        "Could not resolve default branch from local git checkout. "
+        "Tried refs/remotes/origin/HEAD, git branch --show-current, "
+        "and git rev-parse --abbrev-ref HEAD. "
+        "Pass default_branch explicitly if the repository is detached or "
+        "does not have a configured origin/HEAD ref."
+    )
 
 
 def _resolve_repo_name(repo_root: Path) -> str:
@@ -148,3 +165,10 @@ def _git_stdout(repo_root: Path, *args: str) -> str:
         raise ValueError(message) from exc
 
     return completed.stdout.strip()
+
+
+def _try_git_stdout(repo_root: Path, *args: str) -> str | None:
+    try:
+        return _git_stdout(repo_root, *args)
+    except ValueError:
+        return None
