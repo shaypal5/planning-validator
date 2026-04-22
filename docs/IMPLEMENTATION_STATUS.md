@@ -3,7 +3,9 @@
 ## Completed
 
 - Milestone 1 complete: scaffolding and config validation baseline established.
+- Milestone 2 complete: GitHub evidence collection, local planning/tracking inventory loading, and repository snapshot assembly are now implemented with unit coverage.
 - `P-M2B` complete: shared repo-relative glob resolution, `.gitignore` filtering, and local planning/tracking document inventory loading are now implemented with unit coverage.
+- `P-M2C` complete: typed `RepoSnapshot` assembly now combines local markdown inventory with recent PR evidence, with deterministic ordering, local git metadata helpers, and unit coverage.
 - Read and locked to the v1 design docs in `docs/`.
 - Established the initial Python package, CLI skeleton, config models, tests, CI, examples, and repo tooling baseline.
 - Integrated `pr-agent-context` into repository CI and added a refresh workflow that uses append-mode managed comments with coverage artifact reuse.
@@ -12,7 +14,6 @@
 
 ## Remaining
 
-- Milestone 2: GitHub data collection and repository snapshot building.
 - Milestone 3: deterministic stale detector.
 - Milestone 4: bounded LLM patcher and patch validation.
 - Milestone 5: branch and draft PR manager.
@@ -28,7 +29,7 @@
   - `P-M2C`: repository snapshot assembly that combines local files with GitHub evidence.
 - `P-M2A` is complete.
 - `P-M2B` is complete.
-- `P-M2C` is the next implementation slice in progress.
+- `P-M2C` is complete.
 
 ## Decisions
 
