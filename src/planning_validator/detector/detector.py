@@ -7,6 +7,7 @@ from fnmatch import fnmatch
 from planning_validator.config import ResolvedConfig
 from planning_validator.detector.scoring import build_target_file_decisions, dedupe_signals
 from planning_validator.detector.signals import (
+    EligiblePullRequest,
     build_document_contexts,
     build_eligible_pull_request,
     generate_issue_state_signals,
@@ -48,7 +49,7 @@ def run_detector(resolved_config: ResolvedConfig, snapshot: RepoSnapshot) -> Det
         issues = _collect_recent_issues(snapshot, eligible_pull_requests)
         signals.extend(generate_issue_state_signals(document_contexts, issues=issues))
 
-    deduped_signals = dedupe_signals(sorted(signals, key=signal_sort_key))
+    deduped_signals = dedupe_signals(signals)
     deduped_signals.sort(key=signal_sort_key)
     target_files = build_target_file_decisions(
         deduped_signals,
@@ -73,7 +74,7 @@ def run_detector(resolved_config: ResolvedConfig, snapshot: RepoSnapshot) -> Det
 
 def _collect_recent_issues(
     snapshot: RepoSnapshot,
-    eligible_pull_requests: list,
+    eligible_pull_requests: list[EligiblePullRequest],
 ) -> list[RecentIssue]:
     issues_by_number: dict[int, RecentIssue] = {}
     for issue in snapshot.recent_issues:
@@ -94,8 +95,13 @@ def _has_ignored_label(labels: list[str], ignored_labels: list[str]) -> bool:
 
 
 def _build_summary(*, signal_count: int, file_count: int, pr_count: int) -> str:
-    if file_count == 0:
+    if signal_count == 0:
         return "No stale documentation signals detected."
+    if file_count == 0:
+        return (
+            f"Detected {signal_count} stale signals, but none were actionable for updates "
+            f"based on {pr_count} recent merged PRs."
+        )
     return (
         f"Detected {signal_count} stale signals across {file_count} files based on {pr_count} "
         "recent merged PRs."

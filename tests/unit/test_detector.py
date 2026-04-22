@@ -143,8 +143,31 @@ def test_ignore_paths_exclude_pr_without_recording_ignored_number(tmp_path: Path
     assert result.signals == []
 
 
+def test_pr_reflection_can_be_disabled_without_ignoring_prs(tmp_path: Path) -> None:
+    resolved = make_resolved_config(
+        tmp_path,
+        staleness_block="staleness:\n  require_pr_reflection: false\n",
+    )
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content="# Roadmap\nplanned detector work\n",
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n- [ ] detector command\n",
+        recent_prs=[recent_pull_request()],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert result.ignored_prs == []
+    assert result.signals == []
+    assert result.summary == "No stale documentation signals detected."
+
+
 def test_todo_not_marked_done_signal_is_emitted(tmp_path: Path) -> None:
-    resolved = make_resolved_config(tmp_path)
+    resolved = make_resolved_config(
+        tmp_path,
+        staleness_block="staleness:\n  min_signal_score: 0.4\n",
+    )
     snapshot = make_snapshot(
         planning_path="docs/roadmap.md",
         planning_content="# Roadmap\n",
@@ -215,6 +238,54 @@ def test_issue_state_outdated_uses_recent_issues_when_enabled(tmp_path: Path) ->
 
     assert any(
         signal.signal_type is StaleSignalType.ISSUE_STATE_OUTDATED for signal in result.signals
+    )
+
+
+def test_issue_state_outdated_uses_linked_issues_and_deduplicates_numbers(tmp_path: Path) -> None:
+    resolved = make_resolved_config(
+        tmp_path,
+        staleness_block="staleness:\n  require_issue_reflection: true\n",
+    )
+    linked_issue = recent_issue(number=17)
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content="# Roadmap\nIssue #17 remains open and pending.\n",
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n",
+        recent_prs=[
+            recent_pull_request(number=42, linked_issues=[linked_issue]),
+            recent_pull_request(number=43, linked_issues=[linked_issue]),
+        ],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    issue_signals = [
+        signal
+        for signal in result.signals
+        if signal.signal_type is StaleSignalType.ISSUE_STATE_OUTDATED
+    ]
+    assert len(issue_signals) == 1
+
+
+def test_issue_state_outdated_skips_open_issues_and_missing_stale_language(tmp_path: Path) -> None:
+    resolved = make_resolved_config(
+        tmp_path,
+        staleness_block="staleness:\n  require_issue_reflection: true\n",
+    )
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content="# Roadmap\nIssue #17 is noted here without stale wording.\n",
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n",
+        recent_prs=[recent_pull_request()],
+        recent_issues=[recent_issue(number=17, state="open")],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert all(
+        signal.signal_type is not StaleSignalType.ISSUE_STATE_OUTDATED for signal in result.signals
     )
 
 
@@ -320,6 +391,81 @@ def test_thresholding_excludes_below_threshold_files(tmp_path: Path) -> None:
         for signal in result.signals
     )
     assert result.target_files == []
+    assert "but none were actionable for updates" in result.summary
+
+
+def test_checkbox_only_lines_do_not_emit_status_outdated(tmp_path: Path) -> None:
+    resolved = make_resolved_config(tmp_path)
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content="# Roadmap\n",
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n- [ ] add detector command for cli support\n",
+        recent_prs=[recent_pull_request(title="Add detector command for CLI support")],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert any(
+        signal.signal_type is StaleSignalType.TODO_NOT_MARKED_DONE for signal in result.signals
+    )
+    assert all(
+        signal.signal_type is not StaleSignalType.STATUS_OUTDATED for signal in result.signals
+    )
+
+
+def test_completed_language_blocks_status_outdated_signal(tmp_path: Path) -> None:
+    resolved = make_resolved_config(tmp_path)
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content="# Roadmap\nDetector command is planned and complete now.\n",
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n",
+        recent_prs=[recent_pull_request(title="Add detector command")],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert all(
+        signal.signal_type is not StaleSignalType.STATUS_OUTDATED for signal in result.signals
+    )
+
+
+def test_changelog_detection_by_path_keyword_without_body_keyword(tmp_path: Path) -> None:
+    write_file(tmp_path / "docs/release-notes.md", "# Notes\n")
+    write_file(
+        tmp_path / ".github/planning-validator.yml",
+        (
+            "schema_version: v1alpha1\n"
+            "planning_files:\n"
+            "  - docs/release-notes.md\n"
+            "patching:\n"
+            "  provider: openai\n"
+            "  model: gpt-5.4-thinking\n"
+            "  allowed_update_globs:\n"
+            "    - docs/**/*.md\n"
+        ),
+    )
+    resolved = load_config(tmp_path / ".github/planning-validator.yml", repo_root=tmp_path)
+    snapshot = RepoSnapshot.model_validate(
+        {
+            "repo": "acme/widgets",
+            "default_branch": "main",
+            "head_sha": "abc123",
+            "planning_files": [
+                {"path": "docs/release-notes.md", "content": "# Notes\n", "sha": "1"}
+            ],
+            "tracking_files": [],
+            "recent_prs": [recent_pull_request().model_dump(mode="json")],
+        }
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert any(
+        signal.signal_type is StaleSignalType.RECENT_WORK_MISSING_FROM_CHANGELOG
+        for signal in result.signals
+    )
 
 
 def test_max_files_cap_keeps_top_ranked_targets(tmp_path: Path) -> None:
@@ -385,7 +531,7 @@ def test_max_files_cap_keeps_top_ranked_targets(tmp_path: Path) -> None:
     result = run_detector(resolved, snapshot)
 
     assert len(result.target_files) == 1
-    assert result.target_files[0].path == "docs/tasks.md"
+    assert result.target_files[0].path == "docs/roadmap.md"
 
 
 def test_output_is_stable_across_repeated_runs(tmp_path: Path) -> None:

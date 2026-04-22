@@ -351,7 +351,7 @@ def _find_relevant_stale_phrase(
         nearby_lines = document_context.lines[max(0, index - 1) : index + 2]
         nearby_text = "\n".join(nearby_lines).lower()
         if _CHECKBOX_PATTERN.match(line):
-            return "unchecked checklist"
+            continue
         phrase = _find_phrase(nearby_text, _STATUS_PHRASES)
         if phrase is not None:
             completion_phrase = _find_phrase(nearby_text, _COMPLETION_PHRASES)
