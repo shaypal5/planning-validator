@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import typer
 
 from planning_validator.config import ConfigError, load_config
+from planning_validator.detector import run_detector
+from planning_validator.github_api import GitHubApiError, GitHubEvidenceClient
+from planning_validator.repo_snapshot import collect_recent_pr_snapshot, collect_repo_metadata
 
 app = typer.Typer(
     add_completion=False,
@@ -25,6 +29,14 @@ REPO_ROOT_OPTION = typer.Option(
     help="Repository root used when expanding planning/tracking globs.",
 )
 JSON_OPTION = typer.Option(False, "--json", help="Emit machine-readable validation output.")
+JSON_OUT_OPTION = typer.Option(
+    ...,
+    "--json-out",
+    dir_okay=False,
+    writable=True,
+    resolve_path=True,
+    help="Path where the detection JSON artifact will be written.",
+)
 
 
 def _not_implemented(command_name: str) -> None:
@@ -70,10 +82,42 @@ def validate_config(
 
 
 @app.command()
-def detect() -> None:
-    """Reserved for Milestone 3."""
+def detect(
+    config: Path = CONFIG_OPTION,
+    repo_root: Path | None = REPO_ROOT_OPTION,
+    json_out: Path = JSON_OUT_OPTION,
+) -> None:
+    """Detect stale planning and tracking documentation from repository evidence."""
 
-    _not_implemented("detect")
+    root = repo_root or Path.cwd()
+    try:
+        resolved = load_config(config, repo_root=root)
+        metadata = collect_repo_metadata(resolved.repo_root)
+        token = os.environ.get("GITHUB_TOKEN")
+        if not token:
+            raise RuntimeError("GITHUB_TOKEN environment variable is required for detect.")
+
+        owner, repo_name = metadata.repo.split("/", maxsplit=1)
+        with GitHubEvidenceClient(owner=owner, repo=repo_name, token=token) as github_client:
+            snapshot = collect_recent_pr_snapshot(
+                resolved,
+                github_client=github_client,
+                repo=metadata.repo,
+                default_branch=metadata.default_branch,
+                head_sha=metadata.head_sha,
+            )
+
+        detection_result = run_detector(resolved, snapshot)
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(
+            detection_result.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+    except (ConfigError, GitHubApiError, OSError, RuntimeError, ValueError) as exc:
+        typer.echo(f"Detection failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(detection_result.summary)
 
 
 @app.command()
