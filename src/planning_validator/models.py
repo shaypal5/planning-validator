@@ -220,6 +220,18 @@ class LocalDocumentInventory(BaseModel):
         return [document.path for document in self.tracking_documents]
 
 
+class RepoSnapshot(BaseModel):
+    repo: str = Field(min_length=1)
+    default_branch: str = Field(min_length=1)
+    head_sha: str = Field(min_length=1)
+    planning_files: list[LocalDocument] = Field(default_factory=list)
+    tracking_files: list[LocalDocument] = Field(default_factory=list)
+    recent_prs: list[RecentPullRequest] = Field(default_factory=list)
+    recent_issues: list[RecentIssue] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ValidatorConfig(BaseModel):
     schema_version: str
     planning_files: list[str] = Field(min_length=1)

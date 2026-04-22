@@ -17,6 +17,7 @@ from planning_validator.models import (
     RecentIssue,
     RecentPullRequest,
     RenderingConfig,
+    RepoSnapshot,
     StalenessConfig,
     ValidatorConfig,
 )
@@ -259,3 +260,34 @@ def test_local_document_inventory_exposes_deduped_views() -> None:
         "docs/shared.md",
         "docs/tasks.md",
     ]
+
+
+def test_repo_snapshot_accepts_expected_minimal_payload() -> None:
+    snapshot = RepoSnapshot.model_validate(
+        {
+            "repo": "acme/widgets",
+            "default_branch": "main",
+            "head_sha": "abc123",
+            "planning_files": [
+                {
+                    "path": "README.md",
+                    "content": "# Example\n",
+                    "sha": "d9d23745114e75354b13121e4e754b71bf77f79ef64d0e00ad583c85bd65975d",
+                }
+            ],
+            "tracking_files": [],
+            "recent_prs": [
+                {
+                    "number": 42,
+                    "title": "Add snapshot builder",
+                    "merged_at": "2026-04-20T08:30:00Z",
+                    "url": "https://github.com/example/repo/pull/42",
+                }
+            ],
+        }
+    )
+
+    assert snapshot.repo == "acme/widgets"
+    assert snapshot.default_branch == "main"
+    assert snapshot.head_sha == "abc123"
+    assert snapshot.recent_issues == []
