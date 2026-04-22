@@ -268,6 +268,40 @@ def test_issue_state_outdated_uses_linked_issues_and_deduplicates_numbers(tmp_pa
     assert len(issue_signals) == 1
 
 
+def test_issue_state_outdated_skips_duplicate_recent_issue_numbers(tmp_path: Path) -> None:
+    resolved = make_resolved_config(
+        tmp_path,
+        staleness_block="staleness:\n  require_issue_reflection: true\n",
+    )
+    duplicate_issue = recent_issue(number=17).model_dump(mode="json")
+    snapshot = RepoSnapshot.model_validate(
+        {
+            "repo": "acme/widgets",
+            "default_branch": "main",
+            "head_sha": "abc123",
+            "planning_files": [
+                {
+                    "path": "docs/roadmap.md",
+                    "content": "# Roadmap\nIssue #17 remains open and pending.\n",
+                    "sha": "1",
+                }
+            ],
+            "tracking_files": [{"path": "docs/tasks.md", "content": "# Tasks\n", "sha": "2"}],
+            "recent_prs": [recent_pull_request().model_dump(mode="json")],
+            "recent_issues": [duplicate_issue, duplicate_issue],
+        }
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    issue_signals = [
+        signal
+        for signal in result.signals
+        if signal.signal_type is StaleSignalType.ISSUE_STATE_OUTDATED
+    ]
+    assert len(issue_signals) == 1
+
+
 def test_issue_state_outdated_skips_open_issues_and_missing_stale_language(tmp_path: Path) -> None:
     resolved = make_resolved_config(
         tmp_path,
@@ -280,6 +314,27 @@ def test_issue_state_outdated_skips_open_issues_and_missing_stale_language(tmp_p
         tracking_content="# Tasks\n",
         recent_prs=[recent_pull_request()],
         recent_issues=[recent_issue(number=17, state="open")],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert all(
+        signal.signal_type is not StaleSignalType.ISSUE_STATE_OUTDATED for signal in result.signals
+    )
+
+
+def test_issue_state_outdated_skips_closed_issues_without_stale_language(tmp_path: Path) -> None:
+    resolved = make_resolved_config(
+        tmp_path,
+        staleness_block="staleness:\n  require_issue_reflection: true\n",
+    )
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content="# Roadmap\nIssue #17 was discussed in planning notes.\n",
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n",
+        recent_prs=[recent_pull_request()],
+        recent_issues=[recent_issue(number=17, state="closed")],
     )
 
     result = run_detector(resolved, snapshot)
@@ -411,6 +466,23 @@ def test_checkbox_only_lines_do_not_emit_status_outdated(tmp_path: Path) -> None
     )
     assert all(
         signal.signal_type is not StaleSignalType.STATUS_OUTDATED for signal in result.signals
+    )
+
+
+def test_checklist_with_low_term_overlap_does_not_emit_todo_signal(tmp_path: Path) -> None:
+    resolved = make_resolved_config(tmp_path)
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content="# Roadmap\n",
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n- [ ] write docs\n",
+        recent_prs=[recent_pull_request(title="Add detector command for CLI support")],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert all(
+        signal.signal_type is not StaleSignalType.TODO_NOT_MARKED_DONE for signal in result.signals
     )
 
 
