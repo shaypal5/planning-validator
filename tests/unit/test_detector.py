@@ -4,6 +4,10 @@ from pathlib import Path
 
 from planning_validator.config import load_config
 from planning_validator.detector import run_detector
+from planning_validator.detector.signals import (
+    build_document_contexts,
+    generate_issue_state_signals,
+)
 from planning_validator.models import RecentIssue, RecentPullRequest, RepoSnapshot, StaleSignalType
 
 
@@ -302,6 +306,26 @@ def test_issue_state_outdated_skips_duplicate_recent_issue_numbers(tmp_path: Pat
     assert len(issue_signals) == 1
 
 
+def test_generate_issue_state_signals_skips_duplicate_numbers_in_issue_input(
+    tmp_path: Path,
+) -> None:
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content="# Roadmap\nIssue #17 remains open and pending.\n",
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n",
+        recent_prs=[],
+    )
+    duplicate_issue = recent_issue(number=17)
+
+    signals = generate_issue_state_signals(
+        build_document_contexts(snapshot),
+        issues=[duplicate_issue, duplicate_issue],
+    )
+
+    assert len(signals) == 1
+
+
 def test_issue_state_outdated_skips_open_issues_and_missing_stale_language(tmp_path: Path) -> None:
     resolved = make_resolved_config(
         tmp_path,
@@ -341,6 +365,29 @@ def test_issue_state_outdated_skips_closed_issues_without_stale_language(tmp_pat
 
     assert all(
         signal.signal_type is not StaleSignalType.ISSUE_STATE_OUTDATED for signal in result.signals
+    )
+
+
+def test_issue_reflection_uses_linked_issues_when_pr_reflection_is_disabled(tmp_path: Path) -> None:
+    resolved = make_resolved_config(
+        tmp_path,
+        staleness_block=(
+            "staleness:\n  require_pr_reflection: false\n  require_issue_reflection: true\n"
+        ),
+    )
+    linked_issue = recent_issue(number=17, state="closed")
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content="# Roadmap\nIssue #17 remains open and pending.\n",
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n",
+        recent_prs=[recent_pull_request(linked_issues=[linked_issue])],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert any(
+        signal.signal_type is StaleSignalType.ISSUE_STATE_OUTDATED for signal in result.signals
     )
 
 

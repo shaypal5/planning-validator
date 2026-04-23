@@ -82,6 +82,9 @@ def _collect_recent_issues(
     for eligible_pull_request in eligible_pull_requests:
         for issue in eligible_pull_request.pull_request.linked_issues:
             issues_by_number.setdefault(issue.number, issue)
+    for pull_request in snapshot.recent_prs:
+        for issue in pull_request.linked_issues:
+            issues_by_number.setdefault(issue.number, issue)
     return list(issues_by_number.values())
 
 
