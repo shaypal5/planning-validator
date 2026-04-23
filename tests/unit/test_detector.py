@@ -224,6 +224,28 @@ def test_file_mentions_closed_pr_as_open_signal_is_emitted(tmp_path: Path) -> No
     )
 
 
+def test_file_mentions_closed_pr_as_open_requires_nearby_stale_wording(tmp_path: Path) -> None:
+    resolved = make_resolved_config(tmp_path)
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content=(
+            "# Roadmap\n"
+            "PR #42 shipped the detector work.\n"
+            "The unrelated backlog item is still pending review.\n"
+        ),
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n",
+        recent_prs=[recent_pull_request()],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert all(
+        signal.signal_type is not StaleSignalType.FILE_MENTIONS_CLOSED_PR_AS_OPEN
+        for signal in result.signals
+    )
+
+
 def test_issue_state_outdated_uses_recent_issues_when_enabled(tmp_path: Path) -> None:
     resolved = make_resolved_config(
         tmp_path,
@@ -243,6 +265,32 @@ def test_issue_state_outdated_uses_recent_issues_when_enabled(tmp_path: Path) ->
 
     assert any(
         signal.signal_type is StaleSignalType.ISSUE_STATE_OUTDATED for signal in result.signals
+    )
+
+
+def test_issue_state_outdated_requires_nearby_stale_wording(tmp_path: Path) -> None:
+    resolved = make_resolved_config(
+        tmp_path,
+        staleness_block="staleness:\n  require_issue_reflection: true\n",
+    )
+    closed_issue = recent_issue()
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content=(
+            "# Roadmap\n"
+            "Issue #17 moved into the shipped column.\n"
+            "The unrelated backlog item is still pending.\n"
+        ),
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n",
+        recent_prs=[recent_pull_request()],
+        recent_issues=[closed_issue],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert all(
+        signal.signal_type is not StaleSignalType.ISSUE_STATE_OUTDATED for signal in result.signals
     )
 
 

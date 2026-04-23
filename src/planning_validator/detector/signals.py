@@ -131,10 +131,11 @@ def generate_issue_state_signals(
             re.IGNORECASE,
         )
         for document_context in document_contexts:
-            if not issue_reference_pattern.search(document_context.content_lower):
-                continue
-
-            stale_phrase = _find_phrase(document_context.content_lower, _STALE_CLOSED_ISSUE_PHRASES)
+            stale_phrase = _find_stale_phrase_near_reference(
+                document_context.lines,
+                issue_reference_pattern,
+                _STALE_CLOSED_ISSUE_PHRASES,
+            )
             if stale_phrase is None:
                 continue
 
@@ -267,7 +268,15 @@ def _generate_signals_for_document(
         )
 
     if has_pr_reference:
-        stale_pr_phrase = _find_phrase(document_context.content_lower, _STALE_PR_STATE_PHRASES)
+        pr_reference_pattern = re.compile(
+            _PR_REFERENCE_TEMPLATE.format(number=pull_request.number),
+            re.IGNORECASE,
+        )
+        stale_pr_phrase = _find_stale_phrase_near_reference(
+            document_context.lines,
+            pr_reference_pattern,
+            _STALE_PR_STATE_PHRASES,
+        )
         if stale_pr_phrase is not None:
             signals.append(
                 StaleSignal(
@@ -362,6 +371,27 @@ def _find_phrase(content_lower: str, phrases: tuple[str, ...]) -> str | None:
         if phrase in content_lower:
             return phrase
     return None
+
+
+def _find_stale_phrase_near_reference(
+    lines: tuple[str, ...],
+    reference_pattern: re.Pattern[str],
+    phrases: tuple[str, ...],
+) -> str | None:
+    for index, line in enumerate(lines):
+        if reference_pattern.search(line.lower()) is None:
+            continue
+        nearby_text = _nearby_text(lines, index, radius=0)
+        phrase = _find_phrase(nearby_text, phrases)
+        if phrase is not None:
+            return phrase
+    return None
+
+
+def _nearby_text(lines: tuple[str, ...], index: int, *, radius: int = 1) -> str:
+    start = max(0, index - radius)
+    stop = index + radius + 1
+    return "\n".join(lines[start:stop]).lower()
 
 
 def _is_roadmap_like(document: LocalDocument) -> bool:
