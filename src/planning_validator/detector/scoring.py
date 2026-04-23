@@ -37,12 +37,13 @@ def build_target_file_decisions(
 
 
 def dedupe_signals(signals: list[StaleSignal]) -> list[StaleSignal]:
-    deduped: dict[tuple[str, int | None, int | None, str], StaleSignal] = {}
+    deduped: dict[tuple[str, str, int | None, int | None, str], StaleSignal] = {}
     for signal in sorted(signals, key=_signal_dedupe_sort_key):
         pr_number = signal.evidence.get("pr_number")
         issue_number = signal.evidence.get("issue_number")
         deduped.setdefault(
             (
+                signal.target_file,
                 signal.signal_type.value,
                 pr_number if isinstance(pr_number, int) else None,
                 issue_number if isinstance(issue_number, int) else None,

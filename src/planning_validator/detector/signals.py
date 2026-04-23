@@ -237,12 +237,8 @@ def _generate_signals_for_document(
         )
         break
 
-    if (
-        document_context.is_roadmap_like
-        and relevance_terms
-        and _find_phrase(document_context.content_lower, _FUTURE_PHRASES) is not None
-    ):
-        future_phrase = _find_phrase(document_context.content_lower, _FUTURE_PHRASES)
+    future_phrase = _find_phrase(document_context.content_lower, _FUTURE_PHRASES)
+    if document_context.is_roadmap_like and relevance_terms and future_phrase is not None:
         signals.append(
             StaleSignal(
                 signal_type=StaleSignalType.ROADMAP_STAGE_INCORRECT,

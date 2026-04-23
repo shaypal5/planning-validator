@@ -46,7 +46,11 @@ def run_detector(resolved_config: ResolvedConfig, snapshot: RepoSnapshot) -> Det
     signals = generate_pr_signals(document_contexts, eligible_pull_requests)
 
     if resolved_config.config.staleness.require_issue_reflection:
-        issues = _collect_recent_issues(snapshot, eligible_pull_requests)
+        issues = _collect_recent_issues(
+            snapshot,
+            eligible_pull_requests,
+            ignored_labels=resolved_config.config.staleness.ignore_pr_labels,
+        )
         signals.extend(generate_issue_state_signals(document_contexts, issues=issues))
 
     deduped_signals = dedupe_signals(signals)
@@ -75,6 +79,8 @@ def run_detector(resolved_config: ResolvedConfig, snapshot: RepoSnapshot) -> Det
 def _collect_recent_issues(
     snapshot: RepoSnapshot,
     eligible_pull_requests: list[EligiblePullRequest],
+    *,
+    ignored_labels: list[str],
 ) -> list[RecentIssue]:
     issues_by_number: dict[int, RecentIssue] = {}
     for issue in snapshot.recent_issues:
@@ -83,6 +89,8 @@ def _collect_recent_issues(
         for issue in eligible_pull_request.pull_request.linked_issues:
             issues_by_number.setdefault(issue.number, issue)
     for pull_request in snapshot.recent_prs:
+        if _has_ignored_label(pull_request.labels, ignored_labels):
+            continue
         for issue in pull_request.linked_issues:
             issues_by_number.setdefault(issue.number, issue)
     return list(issues_by_number.values())

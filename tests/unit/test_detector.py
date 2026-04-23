@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 from planning_validator.config import load_config
@@ -391,6 +392,38 @@ def test_issue_reflection_uses_linked_issues_when_pr_reflection_is_disabled(tmp_
     )
 
 
+def test_issue_reflection_ignores_linked_issues_from_ignored_prs(tmp_path: Path) -> None:
+    resolved = make_resolved_config(
+        tmp_path,
+        staleness_block=(
+            "staleness:\n"
+            "  require_pr_reflection: false\n"
+            "  require_issue_reflection: true\n"
+            "  ignore_pr_labels:\n"
+            "    - skip-planning-validator\n"
+        ),
+    )
+    linked_issue = recent_issue(number=17, state="closed")
+    snapshot = make_snapshot(
+        planning_path="docs/roadmap.md",
+        planning_content="# Roadmap\nIssue #17 remains open and pending.\n",
+        tracking_path="docs/tasks.md",
+        tracking_content="# Tasks\n",
+        recent_prs=[
+            recent_pull_request(
+                labels=["skip-planning-validator"],
+                linked_issues=[linked_issue],
+            )
+        ],
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert all(
+        signal.signal_type is not StaleSignalType.ISSUE_STATE_OUTDATED for signal in result.signals
+    )
+
+
 def test_fresh_docs_with_pr_reference_and_completion_language_are_clean(tmp_path: Path) -> None:
     resolved = make_resolved_config(tmp_path)
     snapshot = make_snapshot(
@@ -457,6 +490,48 @@ def test_duplicate_document_membership_does_not_duplicate_signals(tmp_path: Path
     assert len(result.target_files) == 1
 
 
+def test_identical_signals_for_different_files_are_not_cross_file_deduped(tmp_path: Path) -> None:
+    write_file(tmp_path / "docs/changelog.md", "# Changelog\n")
+    write_file(tmp_path / "docs/roadmap.md", "# Roadmap\n")
+    write_file(
+        tmp_path / ".github/planning-validator.yml",
+        (
+            "schema_version: v1alpha1\n"
+            "planning_files:\n"
+            "  - docs/changelog.md\n"
+            "  - docs/roadmap.md\n"
+            "patching:\n"
+            "  provider: openai\n"
+            "  model: gpt-5.4-thinking\n"
+            "  allowed_update_globs:\n"
+            "    - docs/**/*.md\n"
+        ),
+    )
+    resolved = load_config(tmp_path / ".github/planning-validator.yml", repo_root=tmp_path)
+    snapshot = RepoSnapshot.model_validate(
+        {
+            "repo": "acme/widgets",
+            "default_branch": "main",
+            "head_sha": "abc123",
+            "planning_files": [
+                {"path": "docs/changelog.md", "content": "# Changelog\n", "sha": "1"},
+                {"path": "docs/roadmap.md", "content": "# Roadmap\n", "sha": "2"},
+            ],
+            "tracking_files": [],
+            "recent_prs": [
+                recent_pull_request(title="Add release metadata").model_dump(mode="json")
+            ],
+        }
+    )
+
+    result = run_detector(resolved, snapshot)
+
+    assert Counter(signal.target_file for signal in result.signals) == {
+        "docs/changelog.md": 2,
+        "docs/roadmap.md": 1,
+    }
+
+
 def test_non_patchable_docs_can_emit_signals_but_not_targets(tmp_path: Path) -> None:
     resolved = make_resolved_config(tmp_path, patching_allowed=["docs/tasks.md"])
     snapshot = make_snapshot(
@@ -476,7 +551,7 @@ def test_non_patchable_docs_can_emit_signals_but_not_targets(tmp_path: Path) -> 
 def test_thresholding_excludes_below_threshold_files(tmp_path: Path) -> None:
     resolved = make_resolved_config(
         tmp_path,
-        staleness_block="staleness:\n  min_signal_score: 0.5\n",
+        staleness_block="staleness:\n  min_signal_score: 0.6\n",
     )
     snapshot = make_snapshot(
         planning_path="docs/roadmap.md",
