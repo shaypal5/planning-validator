@@ -371,6 +371,34 @@ def test_patch_rejects_unsupported_provider(
     assert "Unsupported patching provider" in result.stderr
 
 
+def test_patch_surfaces_validation_failure_details(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_patch_config(tmp_path)
+    detection_json = tmp_path / "detection.json"
+    detection_json.write_text(json.dumps(_stale_detection_payload()), encoding="utf-8")
+    _patch_cli_dependencies(monkeypatch, replacement_content="TBD")
+
+    result = runner.invoke(
+        app,
+        [
+            "patch",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--detection-json",
+            str(detection_json),
+            "--json-out",
+            str(tmp_path / "patch.json"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Patching failed: empty_or_placeholder_content" in result.stderr
+
+
 def test_run_command_is_reserved() -> None:
     result = runner.invoke(app, ["run"])
 
@@ -431,7 +459,13 @@ def _stale_detection_payload() -> dict[str, object]:
     }
 
 
-def _patch_cli_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_cli_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    replacement_content: str = (
+        "---\ntitle: Roadmap\n---\n# Roadmap\nPatcher core completed in #42.\n"
+    ),
+) -> None:
     class FakeClient:
         def __init__(self, **_kwargs: object) -> None:
             pass
@@ -460,10 +494,7 @@ def _patch_cli_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
                         {
                             "path": "docs/roadmap.md",
                             "operation": "replace_file",
-                            "new_content": (
-                                "---\ntitle: Roadmap\n---\n# Roadmap\n"
-                                "Patcher core completed in #42.\n"
-                            ),
+                            "new_content": replacement_content,
                             "rationale": "Reflects merged PR #42.",
                             "evidence_refs": ["PR #42"],
                         }

@@ -9,6 +9,7 @@ import pytest
 from planning_validator.config import load_config
 from planning_validator.models import (
     DetectionResult,
+    FileEdit,
     PatchingConfig,
     PatchRequest,
     PatchResponse,
@@ -16,12 +17,20 @@ from planning_validator.models import (
     RecentPullRequest,
     RepoSnapshot,
     StaleSignal,
+    ValidatedPatch,
 )
 from planning_validator.patcher.file_patch_validator import (
     PatchValidationError,
+    _has_merged_pr_evidence,
     validate_patch_response,
 )
-from planning_validator.patcher.llm_client import OpenAIResponsesClient
+from planning_validator.patcher.llm_client import LLMClientError, OpenAIResponsesClient
+from planning_validator.patcher.patcher import (
+    PatcherError,
+    apply_validated_patch,
+    run_patcher,
+    validate_existing_response,
+)
 from planning_validator.patcher.prompt_builder import (
     PatchRequestError,
     build_patch_prompt,
@@ -125,6 +134,86 @@ def test_build_patch_request_rejects_oversized_inputs(tmp_path: Path) -> None:
         build_patch_request(resolved, _snapshot(), _detection_result())
 
 
+def test_build_patch_request_returns_empty_targets_when_detection_not_stale(
+    tmp_path: Path,
+) -> None:
+    detection = DetectionResult.model_validate(
+        {
+            "is_stale": False,
+            "summary": "Fresh.",
+            "signals": [],
+            "target_files": [],
+            "ignored_prs": [],
+        }
+    )
+
+    request = build_patch_request(_resolved_config(tmp_path), _snapshot(), detection)
+
+    assert request.target_files == []
+    assert request.global_instructions
+
+
+def test_build_patch_request_rejects_missing_snapshot_document(tmp_path: Path) -> None:
+    snapshot = _snapshot().model_copy(update={"planning_files": [], "tracking_files": []})
+
+    with pytest.raises(PatchRequestError, match="missing from repository snapshot"):
+        build_patch_request(_resolved_config(tmp_path), snapshot, _detection_result())
+
+
+def test_build_patch_prompt_omits_disabled_rendering_instructions(tmp_path: Path) -> None:
+    resolved = _resolved_config(
+        tmp_path,
+        extra_config=(
+            "rendering:\n"
+            "  preserve_frontmatter: false\n"
+            "  preserve_unrecognized_sections: false\n"
+            "  prefer_checklists: false\n"
+            "  add_pr_links: false\n"
+            "  add_issue_links: false\n"
+        ),
+    )
+    request = build_patch_request(resolved, _snapshot(), _detection_result())
+
+    prompt = build_patch_prompt(request)
+
+    assert "Preserve YAML frontmatter" not in prompt
+    assert "Include PR links" not in prompt
+    assert "Include issue links" not in prompt
+
+
+def test_build_patch_request_rejects_total_input_limit(tmp_path: Path) -> None:
+    resolved = _resolved_config(
+        tmp_path,
+        extra_patching=("  max_input_chars_per_file: 70\n  max_total_input_chars: 70\n"),
+    )
+    tracking_signal = _signal().model_copy(update={"target_file": "docs/tasks.md"})
+    detection = DetectionResult.model_validate(
+        {
+            "is_stale": True,
+            "summary": "Detected stale docs.",
+            "signals": [_signal().model_dump(), tracking_signal.model_dump()],
+            "target_files": [
+                {
+                    "path": "docs/roadmap.md",
+                    "aggregate_score": 0.7,
+                    "matched_signals": [_signal().model_dump()],
+                    "allowed_to_patch": True,
+                },
+                {
+                    "path": "docs/tasks.md",
+                    "aggregate_score": 0.7,
+                    "matched_signals": [tracking_signal.model_dump()],
+                    "allowed_to_patch": True,
+                },
+            ],
+            "ignored_prs": [],
+        }
+    )
+
+    with pytest.raises(PatchRequestError, match="max_total_input_chars"):
+        build_patch_request(resolved, _snapshot(), detection)
+
+
 def test_openai_responses_client_uses_strict_structured_outputs(
     tmp_path: Path,
 ) -> None:
@@ -181,6 +270,81 @@ def test_openai_responses_client_uses_strict_structured_outputs(
     assert text_format["schema"]["properties"]["edits"]["items"]["properties"]["operation"][
         "enum"
     ] == ["replace_file"]
+
+
+def test_openai_responses_client_surfaces_http_errors(tmp_path: Path) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "boom"})
+
+    request = build_patch_request(_resolved_config(tmp_path), _snapshot(), _detection_result())
+
+    with OpenAIResponsesClient(
+        api_key="token",
+        config=_openai_config(),
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        with pytest.raises(LLMClientError, match="request failed"):
+            client.generate_patch(request)
+
+
+def test_openai_responses_client_rejects_invalid_provider_json(tmp_path: Path) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"not-json")
+
+    request = build_patch_request(_resolved_config(tmp_path), _snapshot(), _detection_result())
+
+    with OpenAIResponsesClient(
+        api_key="token",
+        config=_openai_config(),
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        with pytest.raises(LLMClientError, match="invalid JSON"):
+            client.generate_patch(request)
+
+
+@pytest.mark.parametrize(
+    ("payload", "match"),
+    [
+        ({"output_text": json.dumps({"summary": "ok", "edits": []})}, "ok"),
+        ({}, "did not include output text"),
+        ({"output": [{"type": "refusal", "refusal": "No."}]}, "refused"),
+        ({"output": ["bad", {"content": "bad"}]}, "did not include output text"),
+        (
+            {
+                "output": [
+                    {
+                        "content": [
+                            "bad",
+                            {"type": "text", "text": "not-json"},
+                            {"type": "output_text", "text": ""},
+                        ]
+                    }
+                ]
+            },
+            "not valid JSON",
+        ),
+    ],
+)
+def test_openai_responses_client_output_text_branches(
+    tmp_path: Path,
+    payload: dict[str, object],
+    match: str,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    request = build_patch_request(_resolved_config(tmp_path), _snapshot(), _detection_result())
+
+    with OpenAIResponsesClient(
+        api_key="token",
+        config=_openai_config(),
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        if match == "ok":
+            assert client.generate_patch(request).summary == "ok"
+        else:
+            with pytest.raises((LLMClientError, PatchResponseParseError), match=match):
+                client.generate_patch(request)
 
 
 def test_validate_patch_response_accepts_valid_replacement(tmp_path: Path) -> None:
@@ -318,7 +482,253 @@ def test_validate_patch_response_enforces_max_files() -> None:
     assert any(failure.code == "too_many_edits" for failure in exc_info.value.failures)
 
 
-def _resolved_config(tmp_path: Path, *, extra_patching: str = ""):
+def test_validate_patch_response_rejects_large_unrelated_removal() -> None:
+    original = "\n".join(
+        [
+            "# Roadmap",
+            "A" * 220,
+            "## One",
+            "content",
+            "## Two",
+            "content",
+            "## Three",
+            "content",
+            "## Four",
+            "content",
+        ]
+    )
+    request = _direct_request(original_content=original)
+    response = PatchResponse.model_validate(
+        {
+            "summary": "Collapsed.",
+            "edits": [_edit_payload("docs/roadmap.md", "# Roadmap\nDone in #42.\n")],
+        }
+    )
+
+    with pytest.raises(PatchValidationError) as exc_info:
+        validate_patch_response(request, response)
+
+    assert any(failure.code == "large_unrelated_removal" for failure in exc_info.value.failures)
+
+
+def test_validate_patch_response_rejects_heading_inventory_removal() -> None:
+    original = "\n".join(
+        [
+            "# Roadmap",
+            "## One",
+            "content",
+            "## Two",
+            "content",
+            "## Three",
+            "content",
+            "## Four",
+            "content",
+        ]
+    )
+    request = _direct_request(original_content=original)
+    response = PatchResponse.model_validate(
+        {
+            "summary": "Removed headings.",
+            "edits": [_edit_payload("docs/roadmap.md", "# Roadmap\nDone in #42.\n")],
+        }
+    )
+
+    with pytest.raises(PatchValidationError) as exc_info:
+        validate_patch_response(request, response)
+
+    assert any(failure.code == "large_unrelated_removal" for failure in exc_info.value.failures)
+
+
+def test_has_merged_pr_evidence_returns_false_for_missing_target() -> None:
+    request = _direct_request()
+
+    assert _has_merged_pr_evidence(request, "docs/missing.md") is False
+
+
+def test_validate_patch_response_allows_short_documents_without_section_check() -> None:
+    request = _direct_request(
+        original_content="# Roadmap\n## One\ncontent\n",
+    )
+    response = PatchResponse.model_validate(
+        {
+            "summary": "Small update.",
+            "edits": [_edit_payload("docs/roadmap.md", "# Roadmap\nDone in #42.\n")],
+        }
+    )
+
+    patch = validate_patch_response(request, response)
+
+    assert patch.summary == "Small update."
+
+
+def test_validate_patch_response_rejects_unclosed_frontmatter() -> None:
+    request = _direct_request(original_content="---\ntitle: Roadmap\n# Roadmap\n")
+    response = PatchResponse.model_validate(
+        {
+            "summary": "Changed.",
+            "edits": [_edit_payload("docs/roadmap.md", "---\ntitle: Roadmap\n---\n# Roadmap\n")],
+        }
+    )
+
+    with pytest.raises(PatchValidationError) as exc_info:
+        validate_patch_response(request, response)
+
+    assert any(failure.code == "frontmatter_changed" for failure in exc_info.value.failures)
+
+
+def test_validate_patch_response_defaults_rendering_when_summary_is_missing() -> None:
+    request = _direct_request(original_content="---\ntitle: Roadmap\n---\n# Roadmap\n")
+    request = request.model_copy(
+        update={"config_summary": {"patchable_paths": ["docs/roadmap.md"]}},
+    )
+    response = PatchResponse.model_validate(
+        {
+            "summary": "Changed.",
+            "edits": [_edit_payload("docs/roadmap.md", "# Roadmap\n")],
+        }
+    )
+
+    with pytest.raises(PatchValidationError) as exc_info:
+        validate_patch_response(request, response)
+
+    assert any(failure.code == "frontmatter_changed" for failure in exc_info.value.failures)
+
+
+def test_validate_patch_response_defaults_lists_when_summary_values_are_wrong_type() -> None:
+    request = _direct_request()
+    request = request.model_copy(
+        update={
+            "config_summary": {
+                "patchable_paths": "docs/roadmap.md",
+                "forbidden_update_globs": "docs/*.md",
+                "max_files_to_update": "1",
+                "rendering": {"preserve_frontmatter": False},
+            }
+        },
+    )
+    response = PatchResponse.model_validate(
+        {
+            "summary": "Updated.",
+            "edits": [_edit_payload("docs/roadmap.md", "# Roadmap\nDone in #42.\n")],
+        }
+    )
+
+    patch = validate_patch_response(request, response)
+
+    assert patch.edits[0].path == "docs/roadmap.md"
+
+
+def test_validate_patch_response_rejects_completion_when_signal_pr_is_not_merged() -> None:
+    request = _direct_request(signal_evidence={"pr_number": 99})
+    response = PatchResponse.model_validate(
+        {
+            "summary": "Unsupported.",
+            "edits": [_edit_payload("docs/roadmap.md", "# Roadmap\n- [x] Patcher core\n")],
+        }
+    )
+
+    with pytest.raises(PatchValidationError) as exc_info:
+        validate_patch_response(request, response)
+
+    assert any(failure.code == "unsupported_completion" for failure in exc_info.value.failures)
+
+
+def test_run_patcher_returns_noop_without_targets(tmp_path: Path) -> None:
+    class FailClient:
+        def generate_patch(self, _request: PatchRequest) -> PatchResponse:
+            raise AssertionError("provider should not be called")
+
+    detection = DetectionResult.model_validate(
+        {
+            "is_stale": False,
+            "summary": "Fresh.",
+            "signals": [],
+            "target_files": [],
+            "ignored_prs": [],
+        }
+    )
+
+    patch = run_patcher(
+        _resolved_config(tmp_path),
+        _snapshot(),
+        detection,
+        llm_client=FailClient(),
+    )
+
+    assert patch.edits == []
+
+
+def test_validate_existing_response_uses_same_validation_path(tmp_path: Path) -> None:
+    response = PatchResponse.model_validate(
+        {
+            "summary": "Updated roadmap.",
+            "edits": [
+                _edit_payload(
+                    "docs/roadmap.md",
+                    "---\ntitle: Roadmap\n---\n# Roadmap\nPatcher core completed in #42.\n",
+                )
+            ],
+        }
+    )
+
+    patch = validate_existing_response(
+        _resolved_config(tmp_path),
+        _snapshot(),
+        _detection_result(),
+        response,
+    )
+
+    assert patch.summary == "Updated roadmap."
+
+
+def test_apply_validated_patch_rejects_paths_outside_repo(tmp_path: Path) -> None:
+    patch = ValidatedPatch(
+        repo="acme/widgets",
+        head_sha="abc123",
+        summary="Bad path.",
+        edits=[
+            FileEdit(
+                path="../escape.md",
+                operation="replace_file",
+                new_content="bad",
+                rationale="test",
+                evidence_refs=[],
+            )
+        ],
+    )
+
+    with pytest.raises(PatcherError, match="escapes repository root"):
+        apply_validated_patch(tmp_path, patch)
+
+
+def test_apply_validated_patch_writes_valid_paths(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    patch = ValidatedPatch(
+        repo="acme/widgets",
+        head_sha="abc123",
+        summary="Apply.",
+        edits=[
+            FileEdit(
+                path="docs/roadmap.md",
+                operation="replace_file",
+                new_content="# Roadmap\nDone.\n",
+                rationale="test",
+                evidence_refs=[],
+            )
+        ],
+    )
+
+    apply_validated_patch(tmp_path, patch)
+
+    assert (tmp_path / "docs/roadmap.md").read_text(encoding="utf-8") == "# Roadmap\nDone.\n"
+
+
+def _resolved_config(
+    tmp_path: Path,
+    *,
+    extra_patching: str = "",
+    extra_config: str = "",
+):
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs/roadmap.md").write_text("# Roadmap\n", encoding="utf-8")
     (tmp_path / "docs/tasks.md").write_text("# Tasks\n", encoding="utf-8")
@@ -338,6 +748,7 @@ def _resolved_config(tmp_path: Path, *, extra_patching: str = ""):
             "    - docs/**/*.md\n"
             "  forbidden_update_globs:\n"
             "    - docs/secret.md\n"
+            f"{extra_config}"
         ),
         encoding="utf-8",
     )
@@ -374,6 +785,16 @@ def _recent_pr() -> RecentPullRequest:
             "merged_at": "2026-04-24T10:00:00Z",
             "changed_files": ["src/planning_validator/patcher/patcher.py"],
             "url": "https://github.com/acme/widgets/pull/42",
+        }
+    )
+
+
+def _openai_config() -> PatchingConfig:
+    return PatchingConfig.model_validate(
+        {
+            "provider": "openai",
+            "model": "gpt-5.4-thinking",
+            "allowed_update_globs": ["docs/**/*.md"],
         }
     )
 
