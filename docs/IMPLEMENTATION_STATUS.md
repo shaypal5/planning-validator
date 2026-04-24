@@ -6,16 +6,16 @@
 - Milestone 2 complete: GitHub evidence collection, local planning/tracking inventory loading, and repository snapshot assembly are now implemented with unit coverage.
 - `P-M2B` complete: shared repo-relative glob resolution, `.gitignore` filtering, and local planning/tracking document inventory loading are now implemented with unit coverage.
 - `P-M2C` complete: typed `RepoSnapshot` assembly now combines local markdown inventory with recent PR evidence, with deterministic ordering, local git metadata helpers, and unit coverage.
+- `P-M3A` complete: deterministic stale-document detection, signal scoring, target-file selection, and detection JSON CLI output are implemented with unit coverage.
 - Read and locked to the v1 design docs in `docs/`.
 - Established the initial Python package, CLI skeleton, config models, tests, CI, examples, and repo tooling baseline.
 - Integrated `pr-agent-context` into repository CI and added a refresh workflow that uses append-mode managed comments with coverage artifact reuse.
 - Aligned `pr-agent-context` coverage reporting with the working downstream pattern: raw coverage upload in test jobs, combined XML/report artifacts in a dedicated coverage job, and XML-based patch coverage input for comment rendering.
 - Hardened the `pr-agent-context` refresh workflow with the approval-gated fallback pattern from `v4.0.19`, including scheduled fan-out dispatch, explicit PR SHA overrides, and same-head dispatch dedupe for same-repo PRs.
 
-## Remaining
+## Current and Remaining
 
-- Milestone 3: deterministic stale detector.
-- Milestone 4: bounded LLM patcher and patch validation.
+- `P-M4A [branch-main]`: bounded dry-run-first patcher core, strict model response parsing, patch validation, optional local apply, and tests.
 - Milestone 5: branch and draft PR manager.
 - Milestone 6: end-to-end `run` command and reusable workflow wiring.
 - Milestone 7: fixtures, polish, release preparation, and OSS docs hardening.
@@ -30,6 +30,8 @@
 - `P-M2A` is complete.
 - `P-M2B` is complete.
 - `P-M2C` is complete.
+- `P-M3A` is complete.
+- `P-M4A [branch-main]` means in progress when present on a feature branch and landed once present on `main`.
 
 ## Decisions
 
