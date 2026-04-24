@@ -24,6 +24,16 @@ class GitHubIssueState(StrEnum):
     CLOSED = "closed"
 
 
+class StaleSignalType(StrEnum):
+    MISSING_PR_REFLECTION = "missing_pr_reflection"
+    STATUS_OUTDATED = "status_outdated"
+    ISSUE_STATE_OUTDATED = "issue_state_outdated"
+    TODO_NOT_MARKED_DONE = "todo_not_marked_done"
+    ROADMAP_STAGE_INCORRECT = "roadmap_stage_incorrect"
+    RECENT_WORK_MISSING_FROM_CHANGELOG = "recent_work_missing_from_changelog"
+    FILE_MENTIONS_CLOSED_PR_AS_OPEN = "file_mentions_closed_pr_as_open"
+
+
 class LookbackConfig(BaseModel):
     merged_pr_hours: int = 30
     commit_hours: int = 30
@@ -228,6 +238,35 @@ class RepoSnapshot(BaseModel):
     tracking_files: list[LocalDocument] = Field(default_factory=list)
     recent_prs: list[RecentPullRequest] = Field(default_factory=list)
     recent_issues: list[RecentIssue] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StaleSignal(BaseModel):
+    signal_type: StaleSignalType
+    target_file: str = Field(min_length=1)
+    score: float = Field(ge=0, le=1)
+    reason: str = Field(min_length=1)
+    evidence: dict[str, object] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TargetFileDecision(BaseModel):
+    path: str = Field(min_length=1)
+    aggregate_score: float = Field(ge=0, le=1)
+    matched_signals: list[StaleSignal] = Field(default_factory=list)
+    allowed_to_patch: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DetectionResult(BaseModel):
+    is_stale: bool
+    summary: str = Field(min_length=1)
+    signals: list[StaleSignal] = Field(default_factory=list)
+    target_files: list[TargetFileDecision] = Field(default_factory=list)
+    ignored_prs: list[int] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
