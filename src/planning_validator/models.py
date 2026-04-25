@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
@@ -267,6 +268,69 @@ class DetectionResult(BaseModel):
     signals: list[StaleSignal] = Field(default_factory=list)
     target_files: list[TargetFileDecision] = Field(default_factory=list)
     ignored_prs: list[int] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PatchTargetFile(BaseModel):
+    path: str = Field(min_length=1)
+    original_content: str
+    matched_signals: list[StaleSignal] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PatchRequest(BaseModel):
+    repo: str = Field(min_length=1)
+    head_sha: str = Field(min_length=1)
+    config_summary: dict[str, object] = Field(default_factory=dict)
+    recent_prs: list[RecentPullRequest] = Field(default_factory=list)
+    recent_issues: list[RecentIssue] = Field(default_factory=list)
+    target_files: list[PatchTargetFile] = Field(default_factory=list)
+    global_instructions: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FileEdit(BaseModel):
+    path: str = Field(min_length=1)
+    operation: Literal["replace_file"]
+    new_content: str
+    rationale: str = Field(min_length=1)
+    evidence_refs: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PatchResponse(BaseModel):
+    summary: str = Field(min_length=1)
+    edits: list[FileEdit] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_unique_edit_paths(self) -> PatchResponse:
+        paths = [edit.path for edit in self.edits]
+        duplicate_paths = sorted({path for path in paths if paths.count(path) > 1})
+        if duplicate_paths:
+            joined = ", ".join(duplicate_paths)
+            raise ValueError(f"duplicate edits for path(s): {joined}")
+        return self
+
+
+class PatchValidationFailure(BaseModel):
+    code: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    path: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ValidatedPatch(BaseModel):
+    repo: str = Field(min_length=1)
+    head_sha: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    edits: list[FileEdit] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
