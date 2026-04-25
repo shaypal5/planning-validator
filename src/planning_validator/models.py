@@ -20,6 +20,13 @@ class PullRequestBodyMode(StrEnum):
     SHORT = "short"
 
 
+class PullRequestManagerAction(StrEnum):
+    DISABLED = "disabled"
+    NO_CHANGES = "no_changes"
+    CREATED = "created"
+    UPDATED = "updated"
+
+
 class GitHubIssueState(StrEnum):
     OPEN = "open"
     CLOSED = "closed"
@@ -331,6 +338,28 @@ class ValidatedPatch(BaseModel):
     head_sha: str = Field(min_length=1)
     summary: str = Field(min_length=1)
     edits: list[FileEdit] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AutomationPullRequest(BaseModel):
+    number: int
+    title: str = Field(min_length=1)
+    url: str = Field(min_length=1)
+    head_branch: str = Field(min_length=1)
+    base_branch: str = Field(min_length=1)
+    draft: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PullRequestManagerResult(BaseModel):
+    action: PullRequestManagerAction
+    branch: str = Field(min_length=1)
+    pull_request: AutomationPullRequest | None = None
+    committed: bool = False
+    pushed: bool = False
+    message: str = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
 
