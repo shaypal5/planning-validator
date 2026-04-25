@@ -302,6 +302,13 @@ def test_openai_responses_client_rejects_invalid_provider_json(tmp_path: Path) -
             client.generate_patch(request)
 
 
+def test_openai_responses_client_default_timeout_is_long_enough() -> None:
+    with OpenAIResponsesClient(api_key="token", config=_openai_config()) as client:
+        timeout = client._client.timeout
+
+    assert timeout.read == 120.0
+
+
 @pytest.mark.parametrize(
     ("payload", "match"),
     [
@@ -323,6 +330,23 @@ def test_openai_responses_client_rejects_invalid_provider_json(tmp_path: Path) -
             },
             "not valid JSON",
         ),
+        (
+            {
+                "output": [
+                    {
+                        "content": [
+                            {"type": "metadata", "text": "ignored"},
+                            {"type": "output_text", "text": {"ignored": True}},
+                            {
+                                "type": "output_text",
+                                "text": json.dumps({"summary": "chunked", "edits": []}),
+                            },
+                        ]
+                    }
+                ]
+            },
+            "chunked",
+        ),
     ],
 )
 def test_openai_responses_client_output_text_branches(
@@ -340,8 +364,8 @@ def test_openai_responses_client_output_text_branches(
         config=_openai_config(),
         transport=httpx.MockTransport(handler),
     ) as client:
-        if match == "ok":
-            assert client.generate_patch(request).summary == "ok"
+        if match in {"ok", "chunked"}:
+            assert client.generate_patch(request).summary == match
         else:
             with pytest.raises((LLMClientError, PatchResponseParseError), match=match):
                 client.generate_patch(request)
@@ -464,6 +488,29 @@ def test_validate_patch_response_rejects_unsupported_completion() -> None:
     assert any(failure.code == "unsupported_completion" for failure in exc_info.value.failures)
 
 
+def test_validate_patch_response_allows_mixed_checklist_without_new_completion() -> None:
+    request = _direct_request(
+        original_content="# Roadmap\n- [ ] Patcher core\n- [x] Detector core\n",
+        recent_prs=[],
+        signal_evidence={},
+    )
+    response = PatchResponse.model_validate(
+        {
+            "summary": "Updated prose.",
+            "edits": [
+                _edit_payload(
+                    "docs/roadmap.md",
+                    "# Roadmap\nUpdated intro.\n- [ ] Patcher core\n- [x] Detector core\n",
+                )
+            ],
+        }
+    )
+
+    patch = validate_patch_response(request, response)
+
+    assert patch.summary == "Updated prose."
+
+
 def test_validate_patch_response_enforces_max_files() -> None:
     request = _direct_request()
     response = PatchResponse.model_validate(
@@ -567,6 +614,21 @@ def test_validate_patch_response_rejects_unclosed_frontmatter() -> None:
         {
             "summary": "Changed.",
             "edits": [_edit_payload("docs/roadmap.md", "---\ntitle: Roadmap\n---\n# Roadmap\n")],
+        }
+    )
+
+    with pytest.raises(PatchValidationError) as exc_info:
+        validate_patch_response(request, response)
+
+    assert any(failure.code == "frontmatter_changed" for failure in exc_info.value.failures)
+
+
+def test_validate_patch_response_rejects_stripped_crlf_frontmatter() -> None:
+    request = _direct_request(original_content="---\r\ntitle: Roadmap\r\n---\r\n# Roadmap\r\n")
+    response = PatchResponse.model_validate(
+        {
+            "summary": "Changed.",
+            "edits": [_edit_payload("docs/roadmap.md", "# Roadmap\r\n")],
         }
     )
 

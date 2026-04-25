@@ -31,7 +31,7 @@ class OpenAIResponsesClient:
         api_key: str,
         config: PatchingConfig,
         base_url: str = "https://api.openai.com/v1",
-        timeout: float = 60.0,
+        timeout: float = 120.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._config = config

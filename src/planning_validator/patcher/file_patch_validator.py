@@ -20,8 +20,8 @@ _COMPLETION_PATTERN = re.compile(
     r"(?:-\s+\[x\])|\b(?:done|complete|completed|merged|shipped|landed)\b",
     re.IGNORECASE,
 )
-_INCOMPLETE_PATTERN = re.compile(
-    r"(?:-\s+\[\s\])|\b(?:todo|planned|pending|in progress|next)\b",
+_COMPLETION_MARKER_PATTERN = re.compile(
+    r"-\s+\[x\]|\b(?:done|complete|completed|merged|shipped|landed)\b",
     re.IGNORECASE,
 )
 _PLACEHOLDER_VALUES = {"...", "todo", "tbd", "n/a", "none"}
@@ -183,7 +183,7 @@ def _validate_content(
 
 
 def _frontmatter(content: str) -> str | None:
-    if not content.startswith("---\n"):
+    if not content.startswith(("---\n", "---\r\n")):
         return None
     lines = content.splitlines(keepends=True)
     for index, line in enumerate(lines[1:], start=1):
@@ -216,9 +216,11 @@ def _allowed_reference_numbers(request: PatchRequest) -> set[int]:
 
 
 def _marks_work_complete(original_content: str, new_content: str) -> bool:
-    return bool(_INCOMPLETE_PATTERN.search(original_content)) and bool(
-        _COMPLETION_PATTERN.search(new_content)
-    )
+    return len(_completion_markers(new_content)) > len(_completion_markers(original_content))
+
+
+def _completion_markers(content: str) -> list[str]:
+    return [match.group(0).lower() for match in _COMPLETION_MARKER_PATTERN.finditer(content)]
 
 
 def _has_merged_pr_evidence(request: PatchRequest, path: str) -> bool:
