@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 
 from planning_validator.models import AutomationPullRequest
 
@@ -155,13 +156,18 @@ class GitHubPullRequestClient:
         base = payload.get("base")
         if not isinstance(head, dict) or not isinstance(base, dict):
             raise GitHubPullRequestError("GitHub pull request payload is missing head/base")
-        return AutomationPullRequest.model_validate(
-            {
-                "number": payload["number"],
-                "title": payload["title"],
-                "url": payload["html_url"],
-                "head_branch": head["ref"],
-                "base_branch": base["ref"],
-                "draft": bool(payload.get("draft", False)),
-            }
-        )
+        try:
+            return AutomationPullRequest.model_validate(
+                {
+                    "number": payload["number"],
+                    "title": payload["title"],
+                    "url": payload["html_url"],
+                    "head_branch": head["ref"],
+                    "base_branch": base["ref"],
+                    "draft": bool(payload.get("draft", False)),
+                }
+            )
+        except (KeyError, ValidationError) as exc:
+            raise GitHubPullRequestError(
+                "Unexpected GitHub pull request payload structure"
+            ) from exc

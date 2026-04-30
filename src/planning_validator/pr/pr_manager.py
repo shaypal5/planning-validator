@@ -12,6 +12,7 @@ from planning_validator.models import (
     RecentPullRequest,
     ValidatedPatch,
 )
+from planning_validator.patcher import apply_validated_patch
 from planning_validator.pr.branch_manager import BranchManager
 from planning_validator.pr.pr_body import render_pull_request_body
 
@@ -83,6 +84,7 @@ def manage_patch_pull_request(
 
     manager = branch_manager or BranchManager(repo_root=resolved_config.repo_root)
     manager.prepare_branch(base_branch=base_branch, automation_branch=automation_branch)
+    apply_validated_patch(resolved_config.repo_root, patch)
 
     committed = manager.commit_validated_patch(patch, commit_message=pr_config.title_template)
     if not committed:
