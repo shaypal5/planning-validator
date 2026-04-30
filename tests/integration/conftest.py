@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 from planning_validator.models import (
     AutomationPullRequest,
     PatchResponse,
-    RepoSnapshot,
+    RecentPullRequest,
     ValidatedPatch,
 )
 
@@ -25,13 +25,39 @@ class MetadataStub:
 
 class FakeGitHubEvidenceClient:
     def __init__(self, **_kwargs: object) -> None:
-        pass
+        self.calls: list[dict[str, object]] = []
 
     def __enter__(self) -> FakeGitHubEvidenceClient:
         return self
 
     def __exit__(self, *_args: object) -> None:
         return None
+
+    def fetch_recent_merged_pull_requests(
+        self,
+        *,
+        merged_since: object,
+        include_file_lists: bool = False,
+        include_linked_issues: bool = False,
+    ) -> list[RecentPullRequest]:
+        self.calls.append(
+            {
+                "merged_since": merged_since,
+                "include_file_lists": include_file_lists,
+                "include_linked_issues": include_linked_issues,
+            }
+        )
+        return [
+            RecentPullRequest.model_validate(
+                {
+                    "number": 42,
+                    "title": "Add patcher core",
+                    "merged_at": "2026-04-24T10:00:00Z",
+                    "changed_files": ["src/planning_validator/patcher/patcher.py"],
+                    "url": "https://github.com/acme/widgets/pull/42",
+                }
+            )
+        ]
 
 
 class FakeOpenAIClient:
@@ -111,44 +137,6 @@ def configure_offline_run(
             "- [x] Add patcher core shipped in #42.\n"
             "- Review generated planning-validator PRs before merging documentation updates.\n"
         )
-    monkeypatch.setattr(
-        "planning_validator.cli.collect_recent_pr_snapshot",
-        lambda *args, **kwargs: build_fixture_snapshot(repo_root),
-    )
-
-
-def build_fixture_snapshot(repo_root: Path) -> RepoSnapshot:
-    return RepoSnapshot.model_validate(
-        {
-            "repo": "acme/widgets",
-            "default_branch": "main",
-            "head_sha": "abc123",
-            "planning_files": [
-                {
-                    "path": "docs/roadmap.md",
-                    "content": (repo_root / "docs/roadmap.md").read_text(encoding="utf-8"),
-                    "sha": "roadmap-sha",
-                }
-            ],
-            "tracking_files": [
-                {
-                    "path": "docs/tasks.md",
-                    "content": (repo_root / "docs/tasks.md").read_text(encoding="utf-8"),
-                    "sha": "tasks-sha",
-                }
-            ],
-            "recent_prs": [
-                {
-                    "number": 42,
-                    "title": "Add patcher core",
-                    "merged_at": "2026-04-24T10:00:00Z",
-                    "changed_files": ["src/planning_validator/patcher/patcher.py"],
-                    "url": "https://github.com/acme/widgets/pull/42",
-                }
-            ],
-            "recent_issues": [],
-        }
-    )
 
 
 def automation_pr(number: int = 77) -> AutomationPullRequest:
