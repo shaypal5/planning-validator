@@ -1,0 +1,22 @@
+schema_version: v1alpha1
+
+planning_files:
+  - docs/roadmap.md
+
+tracking_files:
+  - docs/tasks.md
+
+staleness:
+  max_files_to_update: 1
+
+patching:
+  provider: openai
+  model: gpt-5.4-thinking
+  allowed_update_globs:
+    - docs/roadmap.md
+
+pull_request:
+  update_existing: true
+  labels:
+    - documentation
+    - automation

@@ -2,4 +2,5 @@
 
 - [x] Add a planning-validator config.
 - [x] Add a caller workflow.
-- [ ] Review the first generated documentation refresh PR.
+- [ ] Add repository-specific reviewers to generated PRs.
+- [ ] Review the first generated documentation refresh PR before merging.

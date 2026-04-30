@@ -9,15 +9,36 @@ tracking_files:
 
 lookback:
   merged_pr_hours: 30
+  commit_hours: 30
+
+staleness:
+  require_pr_reflection: true
+  require_issue_reflection: false
+  min_signal_score: 0.55
+  max_files_to_update: 3
+  ignore_pr_labels:
+    - skip-planning-validator
+  ignore_paths:
+    - vendor/**
+    - data/**
+    - .github/workflows/**
 
 patching:
   provider: openai
   model: gpt-5.4-thinking
+  temperature: 0.1
   allowed_update_globs:
     - README.md
     - docs/**/*.md
+  forbidden_update_globs:
+    - .github/**
+    - src/**
+    - tests/**
 
 pull_request:
+  branch: automation/planning-validator
+  draft: true
+  update_existing: true
   labels:
     - documentation
     - automation
