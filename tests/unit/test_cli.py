@@ -10,10 +10,12 @@ from planning_validator.cli import app
 from planning_validator.models import (
     AutomationPullRequest,
     DetectionResult,
+    FileEdit,
     PatchResponse,
     PullRequestManagerAction,
     PullRequestManagerResult,
     RepoSnapshot,
+    ValidatedPatch,
 )
 
 runner = CliRunner()
@@ -598,6 +600,166 @@ def test_run_requires_openai_api_key_for_stale_run(
 
     assert result.exit_code == 1
     assert "OPENAI_API_KEY environment variable is required for run" in result.stderr
+
+
+def test_run_rejects_unsupported_provider_after_stale_detection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_patch_config(tmp_path, provider="anthropic", model="claude-sonnet-4-5")
+    _run_cli_common_dependencies(monkeypatch)
+    _run_cli_stale_detection(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--summary-json",
+            str(tmp_path / "summary.json"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Unsupported patching provider for run command: anthropic" in result.stderr
+
+
+def test_run_validated_empty_patch_exits_without_pr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_patch_config(tmp_path)
+    _run_cli_common_dependencies(monkeypatch)
+    _run_cli_stale_detection(monkeypatch)
+    monkeypatch.setattr(
+        "planning_validator.cli.run_patcher",
+        lambda _resolved, snapshot, _detection_result, *, llm_client: ValidatedPatch(
+            repo=snapshot.repo,
+            head_sha=snapshot.head_sha,
+            summary="Validated patch contained no edits.",
+            edits=[],
+        ),
+    )
+
+    def fail_pr_manager(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("PR manager must not run when validated patch has no edits")
+
+    monkeypatch.setattr("planning_validator.cli.manage_patch_pull_request", fail_pr_manager)
+
+    summary_json = tmp_path / "summary.json"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--summary-json",
+            str(summary_json),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Status: no_changes" in result.stdout
+    payload = json.loads(summary_json.read_text(encoding="utf-8"))
+    assert payload["status"] == "no_changes"
+    assert payload["patch_status"] == "validated"
+    assert payload["edited_files"] == []
+
+
+@pytest.mark.parametrize(
+    ("action", "expected_status", "expected_stdout"),
+    [
+        (PullRequestManagerAction.CREATED, "pr_created", "PR action: created"),
+        (PullRequestManagerAction.DISABLED, "pr_disabled", "PR action: disabled"),
+        (PullRequestManagerAction.NO_CHANGES, "no_changes", "PR action: no_changes"),
+    ],
+)
+def test_run_maps_pr_manager_actions_to_summary_status(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    action: PullRequestManagerAction,
+    expected_status: str,
+    expected_stdout: str,
+) -> None:
+    config_path = _write_patch_config(tmp_path)
+    _run_cli_common_dependencies(monkeypatch)
+    _run_cli_stale_detection(monkeypatch)
+
+    def fake_run_patcher(
+        _resolved: object,
+        snapshot: RepoSnapshot,
+        _detection_result: object,
+        *,
+        llm_client: object,
+    ) -> ValidatedPatch:
+        del llm_client
+        return ValidatedPatch(
+            repo=snapshot.repo,
+            head_sha=snapshot.head_sha,
+            summary="Updated roadmap.",
+            edits=[
+                FileEdit(
+                    path="docs/roadmap.md",
+                    operation="replace_file",
+                    new_content=(
+                        "---\ntitle: Roadmap\n---\n# Roadmap\nPatcher core completed in #42.\n"
+                    ),
+                    rationale="Reflects merged PR #42.",
+                    evidence_refs=["PR #42"],
+                )
+            ],
+        )
+
+    def fake_manage_patch_pull_request(**_kwargs: object) -> PullRequestManagerResult:
+        pull_request = None
+        if action is PullRequestManagerAction.CREATED:
+            pull_request = AutomationPullRequest(
+                number=88,
+                title="docs: refresh planning/tracking files",
+                url="https://github.com/acme/widgets/pull/88",
+                head_branch="automation/planning-validator",
+                base_branch="main",
+                draft=True,
+            )
+        return PullRequestManagerResult(
+            action=action,
+            branch="automation/planning-validator",
+            pull_request=pull_request,
+            committed=action is not PullRequestManagerAction.DISABLED,
+            pushed=action is not PullRequestManagerAction.DISABLED,
+            message=f"PR manager returned {action.value}.",
+        )
+
+    monkeypatch.setattr("planning_validator.cli.run_patcher", fake_run_patcher)
+    monkeypatch.setattr(
+        "planning_validator.cli.manage_patch_pull_request",
+        fake_manage_patch_pull_request,
+    )
+
+    summary_json = tmp_path / "summary.json"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--summary-json",
+            str(summary_json),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert expected_stdout in result.stdout
+    payload = json.loads(summary_json.read_text(encoding="utf-8"))
+    assert payload["status"] == expected_status
+    assert payload["pr_action"] == action.value
 
 
 def test_reusable_workflow_invokes_run_command() -> None:
