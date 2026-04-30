@@ -82,11 +82,12 @@ jobs:
       openai_api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-Required permissions:
+Required permissions for the workflow above:
 
 - `contents: write` to update the fixed automation branch.
 - `pull-requests: write` to create or update the generated PR.
-- `issues: write` to apply issue-backed PR labels.
+- `issues: write` to apply issue-backed PR labels. This can be omitted when
+  `pull_request.labels` is empty.
 
 Required secret for the current supported patch provider:
 
