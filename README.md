@@ -164,6 +164,7 @@ pytest
 planning-validator validate-config \
   --config examples/target-repo/.github/planning-validator.yml \
   --repo-root examples/target-repo
+python -m build
 ```
 
 ## Release Prep

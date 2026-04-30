@@ -11,6 +11,7 @@
 - `P-M5A` complete: fixed-branch git orchestration, draft PR create/update behavior, structured body rendering, duplicate protection, and unit coverage are implemented.
 - `P-M6A` complete: end-to-end `planning-validator run` orchestration, safe clean/invalid-patch behavior, reusable workflow runtime wiring, summary artifact upload, and focused unit coverage are implemented.
 - `P-M7A` complete: fixture target repositories, offline integration-style runtime coverage, example target-repo hardening, v1 README usage docs, and release-readiness notes are implemented.
+- `P-REL1A` complete: CI now validates the documented target-repo config and package build, and release docs define the pre-release command sequence, version/tag strategy, and manual release boundaries.
 - Read and locked to the v1 design docs in `docs/`.
 - Established the initial Python package, CLI skeleton, config models, tests, CI, examples, and repo tooling baseline.
 - Integrated `pr-agent-context` into repository CI and added a refresh workflow that uses append-mode managed comments with coverage artifact reuse.
@@ -20,7 +21,8 @@
 ## Current and Remaining
 
 - Current slice: none.
-- Milestone 7: fixtures, polish, release preparation, and OSS docs hardening is complete and ready for PR review.
+- Milestone 7: fixtures, polish, release preparation, and OSS docs hardening is complete.
+- Release gate hardening: `P-REL1A` is complete and ready for PR review.
 
 ## Current planned PR breakdown
 
@@ -37,6 +39,7 @@
 - `P-M5A` is complete.
 - `P-M6A` is complete.
 - `P-M7A` is complete.
+- `P-REL1A` is complete.
 
 ## Decisions
 
@@ -44,6 +47,7 @@
 - Milestone 1 rejects unbounded patch allowlists such as `**/*` to keep v1 edit scope narrow.
 - The reusable workflow installs the package from the workflow ref, invokes `planning-validator run`, and uploads the run summary artifact.
 - `P-M7A` integration coverage uses fixture repositories plus mocked GitHub/model/PR-manager edges so normal tests do not require live GitHub or live model calls.
+- `P-REL1A` keeps release readiness as validation-only CI: documented example config validation and local package artifact build, without publishing, release creation, or automatic tagging.
 - PR handoff automation uses `shaypal5/pr-agent-context` with raw `coverage.py` artifacts plus a combined coverage-report artifact for richer downstream patch-coverage reporting.
 - Slice IDs such as `P-M5A` are stable identifiers, not status carriers. Status is represented by placement under Current, Completed, or Remaining sections; do not encode branch/main state inside slice IDs.
 
