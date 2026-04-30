@@ -280,6 +280,7 @@ def run(
         config_path=config_display,
         message="Run did not complete.",
     )
+    patch_started = False
     try:
         resolved = load_config(config, repo_root=root)
         config_display = str(resolved.config_path)
@@ -327,6 +328,7 @@ def run(
             typer.echo(_format_run_summary(summary))
             return
 
+        patch_started = True
         if resolved.config.patching.provider is not PatchingProvider.OPENAI:
             raise RuntimeError(
                 f"Unsupported patching provider for run command: "
@@ -402,7 +404,10 @@ def run(
         ValueError,
     ) as exc:
         error = _format_run_error(exc)
-        if isinstance(exc, PatchResponseParseError | PatchValidationError):
+        if patch_started or isinstance(
+            exc,
+            LLMClientError | PatchRequestError | PatchResponseParseError | PatchValidationError,
+        ):
             summary = summary.model_copy(update={"patch_status": RunPatchStatus.FAILED})
         summary = summary.model_copy(
             update={
@@ -412,7 +417,7 @@ def run(
                 "error": error,
             }
         )
-        _write_run_summary(summary_json, summary)
+        _try_write_run_summary(summary_json, summary)
         typer.echo(f"Run failed: {error}", err=True)
         raise typer.Exit(code=1) from exc
 
@@ -437,6 +442,13 @@ def _status_from_pr_action(action: PullRequestManagerAction) -> RunCommandStatus
 def _write_run_summary(path: Path, summary: RunCommandSummary) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+
+
+def _try_write_run_summary(path: Path, summary: RunCommandSummary) -> None:
+    try:
+        _write_run_summary(path, summary)
+    except OSError as exc:
+        typer.echo(f"Warning: failed to write run summary artifact: {exc}", err=True)
 
 
 def _format_run_summary(summary: RunCommandSummary) -> str:

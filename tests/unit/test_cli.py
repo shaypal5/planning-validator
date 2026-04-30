@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import planning_validator.cli as cli_module
 from planning_validator.cli import app
 from planning_validator.models import (
     AutomationPullRequest,
@@ -17,6 +18,7 @@ from planning_validator.models import (
     RepoSnapshot,
     ValidatedPatch,
 )
+from planning_validator.patcher.llm_client import LLMClientError
 
 runner = CliRunner()
 
@@ -551,6 +553,73 @@ def test_run_invalid_patch_output_fails_before_pr_creation(
     assert payload["pr_action"] is None
 
 
+def test_run_marks_patch_status_failed_for_llm_client_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_patch_config(tmp_path)
+    _run_cli_common_dependencies(monkeypatch)
+    _run_cli_stale_detection(monkeypatch)
+
+    def fail_patcher(*_args: object, **_kwargs: object) -> None:
+        raise LLMClientError("model provider failed")
+
+    monkeypatch.setattr("planning_validator.cli.run_patcher", fail_patcher)
+
+    summary_json = tmp_path / "summary.json"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--summary-json",
+            str(summary_json),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Run failed: model provider failed" in result.stderr
+    payload = json.loads(summary_json.read_text(encoding="utf-8"))
+    assert payload["patch_status"] == "failed"
+
+
+def test_run_failure_summary_write_is_best_effort(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_patch_config(tmp_path)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "planning_validator.cli.collect_repo_metadata",
+        lambda _repo_root: MetadataStub(),
+    )
+
+    def fail_write_summary(_path: Path, _summary: object) -> None:
+        raise OSError("summary path is not writable")
+
+    monkeypatch.setattr(cli_module, "_write_run_summary", fail_write_summary)
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--summary-json",
+            str(tmp_path / "summary.json"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Warning: failed to write run summary artifact" in result.stderr
+    assert "Run failed: GITHUB_TOKEN environment variable is required for run." in result.stderr
+
+
 def test_run_requires_github_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = _write_patch_config(tmp_path)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
@@ -763,7 +832,10 @@ def test_run_maps_pr_manager_actions_to_summary_status(
 
 
 def test_reusable_workflow_invokes_run_command() -> None:
-    workflow = Path(".github/workflows/reusable-planning-validator.yml").read_text(encoding="utf-8")
+    repo_root = Path(__file__).resolve().parents[2]
+    workflow = (repo_root / ".github/workflows/reusable-planning-validator.yml").read_text(
+        encoding="utf-8"
+    )
 
     assert "contents: write" in workflow
     assert "issues: write" in workflow
