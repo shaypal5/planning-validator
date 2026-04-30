@@ -82,7 +82,6 @@ RUN_SUMMARY_JSON_OPTION = typer.Option(
     Path(".planning-validator/run-summary.json"),
     "--summary-json",
     dir_okay=False,
-    writable=True,
     resolve_path=True,
     help="Path where the end-to-end run summary JSON artifact will be written.",
 )

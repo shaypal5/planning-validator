@@ -460,6 +460,44 @@ def test_run_clean_noop_skips_patch_and_pr(
     assert payload["patch_status"] == "skipped"
 
 
+def test_run_default_summary_path_creates_parent_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_patch_config(tmp_path)
+    _run_cli_common_dependencies(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "planning_validator.cli.run_detector",
+        lambda _resolved, _snapshot: DetectionResult.model_validate(
+            {
+                "is_stale": False,
+                "summary": "No stale documentation signals detected.",
+                "signals": [],
+                "target_files": [],
+                "ignored_prs": [],
+            }
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+        ],
+        catch_exceptions=False,
+    )
+
+    summary_json = tmp_path / ".planning-validator/run-summary.json"
+    assert result.exit_code == 0
+    assert summary_json.is_file()
+    assert json.loads(summary_json.read_text(encoding="utf-8"))["status"] == "clean"
+
+
 def test_run_stale_creates_or_updates_one_pr(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
