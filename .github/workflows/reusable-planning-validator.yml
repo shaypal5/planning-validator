@@ -17,14 +17,18 @@ on:
         required: false
 
 permissions:
-  contents: read
-  pull-requests: read
+  contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
-  validate-config:
+  run:
     runs-on: ubuntu-latest
     env:
       WORKFLOW_REF: ${{ github.workflow_ref }}
+      GITHUB_TOKEN: ${{ github.token }}
+      OPENAI_API_KEY: ${{ secrets.openai_api_key }}
+      ANTHROPIC_API_KEY: ${{ secrets.anthropic_api_key }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,5 +40,12 @@ jobs:
           workflow_repository="${WORKFLOW_REF%%/.github/workflows/*}"
           workflow_git_ref="${WORKFLOW_REF#*@}"
           python -m pip install "git+https://github.com/${workflow_repository}.git@${workflow_git_ref}"
-      - name: Validate target configuration
-        run: planning-validator validate-config --config "${{ inputs.config_path }}"
+      - name: Run planning validator
+        run: planning-validator run --config "${{ inputs.config_path }}"
+      - name: Upload run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: planning-validator-summary
+          path: .planning-validator/run-summary.json
+          if-no-files-found: warn

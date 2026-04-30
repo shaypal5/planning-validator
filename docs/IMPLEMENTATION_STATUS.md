@@ -9,6 +9,7 @@
 - `P-M3A` complete: deterministic stale-document detection, signal scoring, target-file selection, and detection JSON CLI output are implemented with unit coverage.
 - `P-M4A` complete: bounded dry-run-first patcher core, strict model response parsing, patch validation, optional local apply, and tests are implemented.
 - `P-M5A` complete: fixed-branch git orchestration, draft PR create/update behavior, structured body rendering, duplicate protection, and unit coverage are implemented.
+- `P-M6A` complete: end-to-end `planning-validator run` orchestration, safe clean/invalid-patch behavior, reusable workflow runtime wiring, summary artifact upload, and focused unit coverage are implemented.
 - Read and locked to the v1 design docs in `docs/`.
 - Established the initial Python package, CLI skeleton, config models, tests, CI, examples, and repo tooling baseline.
 - Integrated `pr-agent-context` into repository CI and added a refresh workflow that uses append-mode managed comments with coverage artifact reuse.
@@ -17,8 +18,7 @@
 
 ## Current and Remaining
 
-- Current slice: `P-M6A`.
-- Milestone 6: end-to-end `run` command and reusable workflow wiring.
+- Current slice: `P-M7A`.
 - Milestone 7: fixtures, polish, release preparation, and OSS docs hardening.
 
 ## Current planned PR breakdown
@@ -34,13 +34,14 @@
 - `P-M3A` is complete.
 - `P-M4A` is complete.
 - `P-M5A` is complete.
-- `P-M6A` is next.
+- `P-M6A` is complete.
+- `P-M7A` is next.
 
 ## Decisions
 
 - Milestone 1 rejects non-markdown planning/tracking matches during config validation instead of warning.
 - Milestone 1 rejects unbounded patch allowlists such as `**/*` to keep v1 edit scope narrow.
-- The reusable workflow is intentionally a validation-only stub until the `run` command exists.
+- The reusable workflow installs the package from the workflow ref, invokes `planning-validator run`, and uploads the run summary artifact.
 - PR handoff automation uses `shaypal5/pr-agent-context` with raw `coverage.py` artifacts plus a combined coverage-report artifact for richer downstream patch-coverage reporting.
 - Slice IDs such as `P-M5A` are stable identifiers, not status carriers. Status is represented by placement under Current, Completed, or Remaining sections; do not encode branch/main state inside slice IDs.
 

@@ -27,6 +27,21 @@ class PullRequestManagerAction(StrEnum):
     UPDATED = "updated"
 
 
+class RunCommandStatus(StrEnum):
+    CLEAN = "clean"
+    NO_CHANGES = "no_changes"
+    PR_CREATED = "pr_created"
+    PR_UPDATED = "pr_updated"
+    PR_DISABLED = "pr_disabled"
+    FAILED = "failed"
+
+
+class RunPatchStatus(StrEnum):
+    SKIPPED = "skipped"
+    VALIDATED = "validated"
+    FAILED = "failed"
+
+
 class GitHubIssueState(StrEnum):
     OPEN = "open"
     CLOSED = "closed"
@@ -360,6 +375,26 @@ class PullRequestManagerResult(BaseModel):
     committed: bool = False
     pushed: bool = False
     message: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RunCommandSummary(BaseModel):
+    ok: bool
+    status: RunCommandStatus
+    config_path: str
+    repo: str | None = None
+    default_branch: str | None = None
+    head_sha: str | None = None
+    recent_pr_count: int = 0
+    stale_signal_count: int = 0
+    target_files: list[str] = Field(default_factory=list)
+    patch_status: RunPatchStatus = RunPatchStatus.SKIPPED
+    edited_files: list[str] = Field(default_factory=list)
+    pr_action: PullRequestManagerAction | None = None
+    pr_url: str | None = None
+    message: str = Field(min_length=1)
+    error: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 

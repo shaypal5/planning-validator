@@ -7,7 +7,14 @@ import pytest
 from typer.testing import CliRunner
 
 from planning_validator.cli import app
-from planning_validator.models import DetectionResult, PatchResponse, RepoSnapshot
+from planning_validator.models import (
+    AutomationPullRequest,
+    DetectionResult,
+    PatchResponse,
+    PullRequestManagerAction,
+    PullRequestManagerResult,
+    RepoSnapshot,
+)
 
 runner = CliRunner()
 
@@ -399,11 +406,208 @@ def test_patch_surfaces_validation_failure_details(
     assert "Patching failed: empty_or_placeholder_content" in result.stderr
 
 
-def test_run_command_is_reserved() -> None:
-    result = runner.invoke(app, ["run"])
+def test_run_clean_noop_skips_patch_and_pr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_patch_config(tmp_path)
+    _run_cli_common_dependencies(monkeypatch)
+    monkeypatch.setattr(
+        "planning_validator.cli.run_detector",
+        lambda _resolved, _snapshot: DetectionResult.model_validate(
+            {
+                "is_stale": False,
+                "summary": "No stale documentation signals detected.",
+                "signals": [],
+                "target_files": [],
+                "ignored_prs": [],
+            }
+        ),
+    )
+
+    def fail_patcher(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("patcher must not run for a clean detection result")
+
+    def fail_pr_manager(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("PR manager must not run for a clean detection result")
+
+    monkeypatch.setattr("planning_validator.cli.run_patcher", fail_patcher)
+    monkeypatch.setattr("planning_validator.cli.manage_patch_pull_request", fail_pr_manager)
+
+    summary_json = tmp_path / "summary.json"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--summary-json",
+            str(summary_json),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Status: clean" in result.stdout
+    payload = json.loads(summary_json.read_text(encoding="utf-8"))
+    assert payload["ok"] is True
+    assert payload["status"] == "clean"
+    assert payload["patch_status"] == "skipped"
+
+
+def test_run_stale_creates_or_updates_one_pr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_patch_config(tmp_path)
+    calls: dict[str, int] = {"pr_manager": 0}
+    _run_cli_common_dependencies(monkeypatch)
+    _run_cli_stale_detection(monkeypatch)
+
+    def fake_manage_patch_pull_request(**kwargs: object) -> PullRequestManagerResult:
+        calls["pr_manager"] += 1
+        assert kwargs["repo"] == "acme/widgets"
+        patch = kwargs["patch"]
+        assert [edit.path for edit in patch.edits] == ["docs/roadmap.md"]
+        return PullRequestManagerResult(
+            action=PullRequestManagerAction.UPDATED,
+            branch="automation/planning-validator",
+            pull_request=AutomationPullRequest(
+                number=77,
+                title="docs: refresh planning/tracking files",
+                url="https://github.com/acme/widgets/pull/77",
+                head_branch="automation/planning-validator",
+                base_branch="main",
+                draft=True,
+            ),
+            committed=True,
+            pushed=True,
+            message="Updated planning-validator PR #77.",
+        )
+
+    monkeypatch.setattr(
+        "planning_validator.cli.manage_patch_pull_request",
+        fake_manage_patch_pull_request,
+    )
+
+    summary_json = tmp_path / "summary.json"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--summary-json",
+            str(summary_json),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls["pr_manager"] == 1
+    assert "PR action: updated" in result.stdout
+    payload = json.loads(summary_json.read_text(encoding="utf-8"))
+    assert payload["status"] == "pr_updated"
+    assert payload["pr_url"] == "https://github.com/acme/widgets/pull/77"
+    assert payload["edited_files"] == ["docs/roadmap.md"]
+
+
+def test_run_invalid_patch_output_fails_before_pr_creation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_patch_config(tmp_path)
+    _run_cli_common_dependencies(monkeypatch, replacement_content="TBD")
+    _run_cli_stale_detection(monkeypatch)
+
+    def fail_pr_manager(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("PR manager must not run after invalid patch output")
+
+    monkeypatch.setattr("planning_validator.cli.manage_patch_pull_request", fail_pr_manager)
+
+    summary_json = tmp_path / "summary.json"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--summary-json",
+            str(summary_json),
+        ],
+    )
 
     assert result.exit_code == 1
-    assert "'run' is reserved for a later milestone." in result.stderr
+    assert "Run failed: empty_or_placeholder_content" in result.stderr
+    payload = json.loads(summary_json.read_text(encoding="utf-8"))
+    assert payload["ok"] is False
+    assert payload["patch_status"] == "failed"
+    assert payload["pr_action"] is None
+
+
+def test_run_requires_github_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config_path = _write_patch_config(tmp_path)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "planning_validator.cli.collect_repo_metadata",
+        lambda _repo_root: MetadataStub(),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--summary-json",
+            str(tmp_path / "summary.json"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "GITHUB_TOKEN environment variable is required for run" in result.stderr
+
+
+def test_run_requires_openai_api_key_for_stale_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_patch_config(tmp_path)
+    _run_cli_common_dependencies(monkeypatch)
+    _run_cli_stale_detection(monkeypatch)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--summary-json",
+            str(tmp_path / "summary.json"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "OPENAI_API_KEY environment variable is required for run" in result.stderr
+
+
+def test_reusable_workflow_invokes_run_command() -> None:
+    workflow = Path(".github/workflows/reusable-planning-validator.yml").read_text(encoding="utf-8")
+
+    assert "contents: write" in workflow
+    assert "issues: write" in workflow
+    assert "pull-requests: write" in workflow
+    assert 'planning-validator run --config "${{ inputs.config_path }}"' in workflow
+    assert "path: .planning-validator/run-summary.json" in workflow
 
 
 def _write_patch_config(
@@ -538,3 +742,32 @@ def _patch_cli_dependencies(
             }
         ),
     )
+
+
+def _run_cli_common_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    replacement_content: str = (
+        "---\ntitle: Roadmap\n---\n# Roadmap\nPatcher core completed in #42.\n"
+    ),
+) -> None:
+    _patch_cli_dependencies(monkeypatch, replacement_content=replacement_content)
+    monkeypatch.setattr("planning_validator.cli.GitHubPullRequestClient", _FakePullRequestClient)
+
+
+def _run_cli_stale_detection(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "planning_validator.cli.run_detector",
+        lambda _resolved, _snapshot: DetectionResult.model_validate(_stale_detection_payload()),
+    )
+
+
+class _FakePullRequestClient:
+    def __init__(self, **_kwargs: object) -> None:
+        pass
+
+    def __enter__(self) -> _FakePullRequestClient:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
