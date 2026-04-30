@@ -20,8 +20,9 @@
 
 ## Current and Remaining
 
-- Current slice: `P-REL1A` CI and release gate hardening is implemented and ready for PR review.
+- Current slice: none.
 - Milestone 7: fixtures, polish, release preparation, and OSS docs hardening is complete.
+- Release gate hardening: `P-REL1A` is complete and ready for PR review.
 
 ## Current planned PR breakdown
 
