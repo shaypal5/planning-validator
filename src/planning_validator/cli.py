@@ -11,7 +11,15 @@ import typer
 from planning_validator.config import ConfigError, load_config
 from planning_validator.detector import run_detector
 from planning_validator.github_api import GitHubApiError, GitHubEvidenceClient
-from planning_validator.models import DetectionResult, PatchingProvider, ValidatedPatch
+from planning_validator.models import (
+    DetectionResult,
+    PatchingProvider,
+    PullRequestManagerAction,
+    RunCommandStatus,
+    RunCommandSummary,
+    RunPatchStatus,
+    ValidatedPatch,
+)
 from planning_validator.patcher import (
     PatchRequestError,
     PatchResponseParseError,
@@ -20,6 +28,8 @@ from planning_validator.patcher import (
     run_patcher,
 )
 from planning_validator.patcher.llm_client import LLMClientError, OpenAIResponsesClient
+from planning_validator.pr.github_client import GitHubPullRequestClient, GitHubPullRequestError
+from planning_validator.pr.pr_manager import PRManagerError, manage_patch_pull_request
 from planning_validator.repo_snapshot import collect_recent_pr_snapshot, collect_repo_metadata
 
 app = typer.Typer(
@@ -67,6 +77,13 @@ APPLY_OPTION = typer.Option(
     False,
     "--apply",
     help="Apply validated replacements to markdown files. Defaults to dry-run artifact output.",
+)
+RUN_SUMMARY_JSON_OPTION = typer.Option(
+    Path(".planning-validator/run-summary.json"),
+    "--summary-json",
+    dir_okay=False,
+    resolve_path=True,
+    help="Path where the end-to-end run summary JSON artifact will be written.",
 )
 
 
@@ -247,10 +264,215 @@ def _write_patch_artifact(path: Path, patch_result: ValidatedPatch) -> None:
 
 
 @app.command()
-def run() -> None:
-    """Reserved for Milestone 6."""
+def run(
+    config: Path = CONFIG_OPTION,
+    repo_root: Path | None = REPO_ROOT_OPTION,
+    summary_json: Path = RUN_SUMMARY_JSON_OPTION,
+) -> None:
+    """Run detection, bounded patching, and fixed-branch draft PR management."""
 
-    _not_implemented("run")
+    root = repo_root or Path.cwd()
+    config_display = str(config)
+    summary = RunCommandSummary(
+        ok=False,
+        status=RunCommandStatus.FAILED,
+        config_path=config_display,
+        message="Run did not complete.",
+    )
+    patch_started = False
+    try:
+        resolved = load_config(config, repo_root=root)
+        config_display = str(resolved.config_path)
+        metadata = collect_repo_metadata(resolved.repo_root)
+        summary = summary.model_copy(
+            update={
+                "config_path": config_display,
+                "repo": metadata.repo,
+                "default_branch": metadata.default_branch,
+                "head_sha": metadata.head_sha,
+            }
+        )
+
+        github_token = _require_env_var("GITHUB_TOKEN", "run")
+        owner, repo_name = metadata.repo.split("/", maxsplit=1)
+        with GitHubEvidenceClient(owner=owner, repo=repo_name, token=github_token) as github_client:
+            snapshot = collect_recent_pr_snapshot(
+                resolved,
+                github_client=github_client,
+                repo=metadata.repo,
+                default_branch=metadata.default_branch,
+                head_sha=metadata.head_sha,
+            )
+
+        detection_result = run_detector(resolved, snapshot)
+        target_files = [
+            target.path for target in detection_result.target_files if target.allowed_to_patch
+        ]
+        summary = summary.model_copy(
+            update={
+                "recent_pr_count": len(snapshot.recent_prs),
+                "stale_signal_count": len(detection_result.signals),
+                "target_files": target_files,
+            }
+        )
+        if not detection_result.is_stale or not target_files:
+            summary = summary.model_copy(
+                update={
+                    "ok": True,
+                    "status": RunCommandStatus.CLEAN,
+                    "message": detection_result.summary,
+                }
+            )
+            _write_run_summary(summary_json, summary)
+            typer.echo(_format_run_summary(summary))
+            return
+
+        patch_started = True
+        if resolved.config.patching.provider is not PatchingProvider.OPENAI:
+            raise RuntimeError(
+                f"Unsupported patching provider for run command: "
+                f"{resolved.config.patching.provider.value}"
+            )
+        openai_api_key = _require_env_var("OPENAI_API_KEY", "run")
+
+        with OpenAIResponsesClient(
+            api_key=openai_api_key,
+            config=resolved.config.patching,
+        ) as llm_client:
+            patch_result = run_patcher(
+                resolved,
+                snapshot,
+                detection_result,
+                llm_client=llm_client,
+            )
+        summary = summary.model_copy(
+            update={
+                "patch_status": RunPatchStatus.VALIDATED,
+                "edited_files": [edit.path for edit in patch_result.edits],
+            }
+        )
+        if not patch_result.edits:
+            summary = summary.model_copy(
+                update={
+                    "ok": True,
+                    "status": RunCommandStatus.NO_CHANGES,
+                    "message": patch_result.summary,
+                }
+            )
+            _write_run_summary(summary_json, summary)
+            typer.echo(_format_run_summary(summary))
+            return
+
+        with GitHubPullRequestClient(
+            owner=owner,
+            repo=repo_name,
+            token=github_token,
+        ) as pull_request_client:
+            pr_result = manage_patch_pull_request(
+                resolved_config=resolved,
+                patch=patch_result,
+                recent_prs=snapshot.recent_prs,
+                repo=metadata.repo,
+                default_branch=metadata.default_branch,
+                github_client=pull_request_client,
+            )
+
+        status = _status_from_pr_action(pr_result.action)
+        summary = summary.model_copy(
+            update={
+                "ok": True,
+                "status": status,
+                "pr_action": pr_result.action,
+                "pr_url": pr_result.pull_request.url if pr_result.pull_request else None,
+                "message": pr_result.message,
+            }
+        )
+        _write_run_summary(summary_json, summary)
+        typer.echo(_format_run_summary(summary))
+    except (
+        ConfigError,
+        GitHubApiError,
+        GitHubPullRequestError,
+        LLMClientError,
+        OSError,
+        PatchRequestError,
+        PatchResponseParseError,
+        PatchValidationError,
+        PRManagerError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
+        error = _format_run_error(exc)
+        if patch_started or isinstance(
+            exc,
+            LLMClientError | PatchRequestError | PatchResponseParseError | PatchValidationError,
+        ):
+            summary = summary.model_copy(update={"patch_status": RunPatchStatus.FAILED})
+        summary = summary.model_copy(
+            update={
+                "ok": False,
+                "status": RunCommandStatus.FAILED,
+                "message": "Run failed.",
+                "error": error,
+            }
+        )
+        _try_write_run_summary(summary_json, summary)
+        typer.echo(f"Run failed: {error}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _require_env_var(name: str, command_name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"{name} environment variable is required for {command_name}.")
+    return value
+
+
+def _status_from_pr_action(action: PullRequestManagerAction) -> RunCommandStatus:
+    if action is PullRequestManagerAction.CREATED:
+        return RunCommandStatus.PR_CREATED
+    if action is PullRequestManagerAction.UPDATED:
+        return RunCommandStatus.PR_UPDATED
+    if action is PullRequestManagerAction.DISABLED:
+        return RunCommandStatus.PR_DISABLED
+    return RunCommandStatus.NO_CHANGES
+
+
+def _write_run_summary(path: Path, summary: RunCommandSummary) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+
+
+def _try_write_run_summary(path: Path, summary: RunCommandSummary) -> None:
+    try:
+        _write_run_summary(path, summary)
+    except OSError as exc:
+        typer.echo(f"Warning: failed to write run summary artifact: {exc}", err=True)
+
+
+def _format_run_summary(summary: RunCommandSummary) -> str:
+    lines = [
+        summary.message,
+        f"Status: {summary.status.value}",
+        f"Recent PRs considered: {summary.recent_pr_count}",
+        f"Stale signals: {summary.stale_signal_count}",
+        f"Patch status: {summary.patch_status.value}",
+    ]
+    if summary.target_files:
+        lines.append("Target files: " + ", ".join(summary.target_files))
+    if summary.edited_files:
+        lines.append("Edited files: " + ", ".join(summary.edited_files))
+    if summary.pr_action:
+        lines.append(f"PR action: {summary.pr_action.value}")
+    if summary.pr_url:
+        lines.append(f"PR URL: {summary.pr_url}")
+    return "\n".join(lines)
+
+
+def _format_run_error(exc: Exception) -> str:
+    if isinstance(exc, PatchValidationError):
+        return "; ".join(f"{failure.code}: {failure.message}" for failure in exc.failures)
+    return str(exc)
 
 
 if __name__ == "__main__":
