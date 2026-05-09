@@ -4,7 +4,7 @@
 
 - Keep this file static. Do not store dynamic status, milestone notes, or roadmaps here.
 - Treat the design docs under `docs/` as the product source of truth.
-- Use repo-specific GitHub MCP tools first for PR and issue actions. Use `gh` only when MCP support is missing.
+- Use standard `git` and `gh` CLI first for repository and GitHub work; use git/GitHub MCP tools only for CLI gaps, unavailable CLI, or explicit user request.
 
 ## Commands
 
